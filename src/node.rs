@@ -1,6 +1,6 @@
 use crate::resource;
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Display, Formatter};
 
 pub type NodeId = usize;
 
@@ -12,7 +12,7 @@ pub struct Node {
     pub share_from: Vec<NodeId>,
 }
 
-impl Debug for Node {
+impl Display for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -33,13 +33,13 @@ impl Node {
         name: &str,
         cores: f32,
         memory: f32,
-        memory_lendable: f32,
+        // memory_lendable: f32,
     ) -> Result<Self, String> {
         let name = String::from(name);
-        let rcores = resource::Resource::new(cores, 0.);
+        let cores = resource::Resource::new(cores /*, 0.*/);
 
-        let rcores = match rcores {
-            Ok(rcores) => rcores,
+        let cores = match cores {
+            Ok(cores) => cores,
             Err(s) => {
                 return Err(format!(
                     "cores definition of {} invalid because {}",
@@ -47,10 +47,10 @@ impl Node {
                 ))
             }
         };
-        let rmemory = resource::Resource::new(memory, memory_lendable);
+        let memory = resource::Resource::new(memory /*, memory_lendable*/);
 
-        let rmemory = match rmemory {
-            Ok(rmemory) => rmemory,
+        let memory = match memory {
+            Ok(memory) => memory,
             Err(s) => {
                 return Err(format!(
                     "memory definition of {} invalid because {}",
@@ -60,11 +60,30 @@ impl Node {
         };
 
         Ok(Self {
-            cores: rcores,
-            memory: rmemory,
-            name: name,
+            cores,
+            memory,
+            name,
             share_from: vec![],
-            uid: uid,
+            uid,
         })
+    }
+
+    pub fn can_host_job(&self, cores: f32, memory: f32) -> bool {
+        self.cores.current >= cores && self.memory.current >= memory
+    }
+
+    pub fn allocate_job(&mut self, cores: f32, memory: f32) {
+        self.allocate_cores(cores);
+        self.allocate_memory(memory);
+    }
+
+    pub fn allocate_cores(&mut self, cores: f32) {
+        self.cores.current -= cores;
+        assert!(self.cores.current >= 0.);
+    }
+
+    pub fn allocate_memory(&mut self, memory: f32) {
+        self.memory.current -= memory;
+        assert!(self.memory.current >= 0.);
     }
 }
