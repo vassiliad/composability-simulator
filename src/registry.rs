@@ -3,10 +3,10 @@ use std::collections::HashMap;
 pub type UIDFactory = HashMap<String, usize>;
 
 pub struct NodeRegistry {
-    registry: UIDFactory,
-    nodes: Vec<Node>,
-    sorted_cores: Vec<usize>,
-    sorted_memory: Vec<usize>,
+    pub registry: UIDFactory,
+    pub nodes: Vec<Node>,
+    pub sorted_cores: Vec<usize>,
+    pub sorted_memory: Vec<usize>,
 }
 
 impl NodeRegistry {
@@ -38,7 +38,7 @@ impl NodeRegistry {
         }
     }
 
-    fn index_bisect_right<FCompareNodes>(
+    pub fn index_bisect_right<FCompareNodes>(
         &self,
         indices: &Vec<usize>,
         node_before: FCompareNodes,
@@ -48,22 +48,17 @@ impl NodeRegistry {
     where
         FCompareNodes: Fn(&Node) -> bool,
     {
-        let mut lo = lo.or(Some(0)).unwrap();
-        let mut hi = hi.or(Some(indices.len())).unwrap();
-
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            let idx = indices[mid];
-            let node = &self.nodes[idx];
-
-            if node_before(node) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
+        let lo = lo.or(Some(0)).unwrap();
+        let hi = hi.or(Some(indices.len())).unwrap();
+        if lo != hi {
+            let predicate = |idx: &usize| -> bool {
+                let node = &self.nodes[*idx];
+                node_before(node)
+            };
+            indices[lo..hi].partition_point(predicate) + lo
+        } else {
+            lo
         }
-
-        lo
     }
 
     fn insort_cores(&mut self, node: &Node) {
@@ -138,6 +133,42 @@ impl NodeRegistry {
             .iter()
             .skip(idx)
             .map(|idx| &self.nodes[*idx])
+    }
+
+    pub fn idx_sorted_cores(&self, node: &Node) -> usize {
+        let cores_target = node.cores.current;
+        let uid = node.uid;
+
+        let pred_cores = |node: &Node| -> bool { node.cores.current < cores_target };
+
+        let idx_cores = self.index_bisect_right(&self.sorted_cores, pred_cores, None, None);
+
+        let sorted_cores = &self.sorted_cores;
+        let idx_cores = sorted_cores[idx_cores..sorted_cores.len()]
+            .iter()
+            .position(|idx: &usize| self.nodes[*idx].uid == uid)
+            .unwrap()
+            + idx_cores;
+
+        idx_cores
+    }
+
+    pub fn idx_sorted_memory(&self, node: &Node) -> usize {
+        let memory_target = node.memory.current;
+        let uid = node.uid;
+
+        let pred_memory = |node: &Node| -> bool { node.memory.current < memory_target };
+
+        let idx_memory = self.index_bisect_right(&self.sorted_memory, pred_memory, None, None);
+
+        let sorted_memory = &self.sorted_memory;
+        let idx_memory = sorted_memory[idx_memory..sorted_memory.len()]
+            .iter()
+            .position(|idx: &usize| self.nodes[*idx].uid == uid)
+            .unwrap()
+            + idx_memory;
+
+        idx_memory
     }
 
     pub fn new_node(

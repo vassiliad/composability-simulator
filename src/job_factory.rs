@@ -3,46 +3,42 @@ use std::collections::VecDeque;
 
 pub trait JobFactory {
     fn job_peek(&self) -> Option<&Job>;
-    fn job_get(&mut self, when: f32) -> Job;
-    fn job_mark_done(&mut self, job: &Job) {}
+    fn job_get(&mut self) -> Job;
+    fn job_mark_done(&mut self, _job: &Job) {}
+    fn more_jobs(&self) -> bool;
 }
 
-struct JobCollection<T>
-where
-    T: Fn(&Job),
-{
-    jobs: VecDeque<Job>,
-    cb_done: Option<T>,
+pub struct JobCollection {
+    pub jobs_done: Vec<usize>,
+    pub jobs: VecDeque<Job>,
 }
 
-impl<T> JobFactory for JobCollection<T>
-where
-    T: Fn(&Job),
-{
+impl JobFactory for JobCollection {
     fn job_peek(&self) -> Option<&Job> {
         self.jobs.get(0)
     }
 
-    fn job_get(&mut self, when: f32) -> Job {
+    fn job_get(&mut self) -> Job {
         self.jobs
             .pop_front()
             .expect("JobCollection is already empty")
     }
 
     fn job_mark_done(&mut self, job: &Job) {
-        match &self.cb_done {
-            Some(cb_done) => cb_done(job),
-            None => (),
-        }
+        self.jobs_done.push(job.uid)
+    }
+
+    fn more_jobs(&self) -> bool {
+        self.jobs.len() > 0
     }
 }
 
-impl<T> JobCollection<T>
-where
-    T: Fn(&Job),
-{
-    fn new(jobs: Vec<Job>, cb_done: Option<T>) -> Self {
+impl JobCollection {
+    pub fn new(jobs: Vec<Job>) -> Self {
         let jobs = VecDeque::from(jobs);
-        Self { jobs, cb_done }
+        Self {
+            jobs,
+            jobs_done: vec![],
+        }
     }
 }

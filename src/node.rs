@@ -86,4 +86,14 @@ impl Node {
         self.memory.current -= memory;
         assert!(self.memory.current >= 0.);
     }
+
+    pub fn free_memory(&mut self, memory: f32) {
+        self.memory.current += memory;
+        assert!(self.memory.current <= self.memory.capacity)
+    }
+
+    pub fn free_cores(&mut self, cores: f32) {
+        self.cores.current += cores;
+        assert!(self.cores.current <= self.cores.capacity)
+    }
 }
