@@ -1,6 +1,5 @@
 use crate::job::Job;
 use crate::job_factory::JobFactory;
-use crate::node::Node;
 use crate::registry::NodeRegistry;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -73,40 +72,136 @@ where
         // );
     }
 
-    fn job_allocate(registry: &mut NodeRegistry, job: &mut Job) -> bool {
-        let pred_fit = |node: &Node| -> bool {
-            node.cores.current < job.cores && node.memory.current < job.memory
-        };
+    fn job_allocate_on_single_node(
+        registry: &mut NodeRegistry,
+        idx_cores: usize,
+        idx_memory: usize,
+        job: &mut Job,
+    ) {
+        let idx_node = registry.sorted_cores[idx_cores];
 
-        let idx_cores = registry.index_bisect_right(&registry.sorted_cores, pred_fit, None, None);
+        // VV: finally, actually allocate the job on the node
+        let node = &mut registry.nodes[idx_node];
 
-        if idx_cores < registry.sorted_cores.len() {
-            // VV: Found a node which can fit the entire Job, good job (hehe)
-            let idx_node;
+        println!("Can fit {}x{} to {}", job.cores, job.memory, node);
 
-            idx_node = registry.sorted_cores[idx_cores];
-            let node = &registry.nodes[idx_node];
-            // println!("Can fit {}x{} to {}", job.cores, job.memory, node);
+        node.allocate_job(job.cores, job.memory);
 
-            // VV: Now find the idx of node in the sorted_memory array of indices
-            let idx_memory = registry.idx_sorted_memory(node);
+        job.node_cores = Some(node.uid);
+        job.node_memory.push((node.uid, job.memory));
+        // VV: and then re-sort the sorted_cores and sorted_memory indices of
+        // the registry. This ensures that the next allocation will find
+        // the nodes in proper order.
+        registry.resort_nodes_cores(&vec![idx_cores]);
+        registry.resort_nodes_memory(&vec![idx_memory]);
+    }
 
-            // VV: finally, actually allocate the job on the node
-            let node = &mut registry.nodes[idx_node];
-            node.allocate_job(job.cores, job.memory);
+    fn job_allocate_on_many_nodes(
+        registry: &mut NodeRegistry,
+        idx_cores: usize,
+        idx_memory: usize,
+        job: &mut Job,
+    ) -> bool {
+        let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
+        // VV: Assumes that *all* node scan steal memory from *any* other node
+        let total_memory: f32 = all_memory
+            .iter()
+            .map(|idx: &usize| registry.nodes[*idx].memory.current)
+            .sum();
 
-            job.node_cores = Some(node.uid);
-            job.node_memory.push((node.uid, job.memory));
-            // VV: and then re-sort the sorted_cores and sorted_memory indices of
-            // the registry. This ensures that the next allocation will find
-            // the nodes in proper order.
-            registry.resort_nodes_cores(&vec![idx_cores]);
-            registry.resort_nodes_memory(&vec![idx_memory]);
-
-            return true;
+        if total_memory < job.memory {
+            print!("Not enough memory {} for {}", total_memory, job.memory);
+            return false;
         }
 
-        false
+        let mut indices_memory = vec![];
+
+        let mut rem_mem = job.memory;
+
+        let uid_cores = registry.sorted_cores[idx_cores];
+
+        registry.nodes[uid_cores].allocate_cores(job.cores);
+
+        let node_cores = &registry.nodes[uid_cores];
+        job.node_cores = Some(node_cores.uid);
+
+        if node_cores.memory.current > 0.0 {
+            let alloc = rem_mem.min(node_cores.memory.current);
+            let this_mem_idx = registry.idx_sorted_memory(&node_cores);
+            job.node_memory.push((this_mem_idx, alloc));
+            indices_memory.push(this_mem_idx);
+
+            registry.nodes[uid_cores].allocate_memory(alloc);
+            rem_mem -= alloc;
+        }
+
+        let mut idx_memory = idx_memory;
+        for uid_mem in all_memory {
+            if uid_mem != &uid_cores {
+                let node_mem = &registry.nodes[*uid_mem];
+                let alloc = rem_mem.min(node_mem.memory.current);
+                job.node_memory.push((idx_memory, alloc));
+
+                indices_memory.push(idx_memory);
+                registry.nodes[*uid_mem].allocate_memory(alloc);
+                rem_mem -= alloc;
+
+                if rem_mem == 0.0 {
+                    break;
+                }
+            }
+
+            idx_memory += 1;
+        }
+
+        registry.resort_nodes_cores(&vec![idx_cores]);
+        registry.resort_nodes_memory(&indices_memory);
+
+        assert_eq!(rem_mem, 0.0);
+
+        true
+    }
+
+    fn job_allocate(registry: &mut NodeRegistry, job: &mut Job) -> bool {
+        let cores = registry.idx_nodes_with_more_cores(job.cores);
+        if cores == registry.sorted_cores.len() {
+            return false;
+        }
+        let memory = registry.idx_nodes_with_more_memory(job.memory);
+
+        if memory < registry.sorted_memory.len() {
+            let all_memory = &registry.sorted_memory[memory..registry.sorted_memory.len()];
+
+            let all_cores = &registry.sorted_cores[cores..registry.sorted_cores.len()];
+            // VV: There's a chance one of the nodes with enough cores (all_cores) has enough
+            // memory too (all_memory)
+            let mut idx_cores = cores;
+
+            for uid_cores in all_cores {
+                if let Some(idx_inner) = all_memory.iter().position(|uid: &usize| uid == uid_cores)
+                {
+                    let idx_memory = idx_inner + memory;
+                    Self::job_allocate_on_single_node(registry, idx_cores, idx_memory, job);
+                    return true;
+                }
+
+                idx_cores += 1;
+            }
+        }
+
+        if job.can_borrow == false {
+            return false;
+        }
+
+        let idx_memory = registry.idx_nodes_with_more_memory(0.0);
+
+        for idx_cores in cores..registry.sorted_cores.len() {
+            if Self::job_allocate_on_many_nodes(registry, idx_cores, idx_memory, job) == true {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     pub fn tick(&mut self) -> bool {

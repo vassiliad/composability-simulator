@@ -34,11 +34,10 @@ impl Resource {
         self.num_allocate -= 1;
         if self.num_allocate == 0 {
             self.current = self.capacity;
-            return
+            return;
         }
         self.current += value;
 
         assert!(self.current <= self.capacity)
     }
-    
 }

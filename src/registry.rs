@@ -153,6 +153,22 @@ impl NodeRegistry {
         idx_cores
     }
 
+    pub fn idx_nodes_with_more_memory(&self, memory: f32) -> usize {
+        let pred = |idx: &usize| -> bool {
+            let node = &self.nodes[*idx];
+            node.memory.current < memory
+        };
+        self.sorted_memory.partition_point(pred)
+    }
+
+    pub fn idx_nodes_with_more_cores(&self, cores: f32) -> usize {
+        let pred = |idx: &usize| -> bool {
+            let node = &self.nodes[*idx];
+            node.cores.current < cores
+        };
+        self.sorted_cores.partition_point(pred)
+    }
+
     pub fn idx_sorted_memory(&self, node: &Node) -> usize {
         let memory_target = node.memory.current;
         let uid = node.uid;
