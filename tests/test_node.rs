@@ -6,7 +6,7 @@ mod test_node {
     use super::*;
 
     #[test]
-    fn test_init_node() -> Result<(), String> {
+    fn init_node() -> Result<(), String> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("test", 1.0, 1. /*, 1.*/)?;
 
@@ -14,7 +14,7 @@ mod test_node {
     }
 
     #[test]
-    fn test_fail_init_node_name() -> Result<(), String> {
+    fn fail_init_node_name() -> Result<(), String> {
         let mut reg = registry::NodeRegistry::new();
         let _n0 = reg.new_node("test", 1.0, 1. /*, 1.*/)?;
         let n1 = reg.new_node("test", 1.0, 1. /*, 1.*/);
@@ -26,7 +26,7 @@ mod test_node {
     }
 
     #[test]
-    fn test_insort_nodes() -> Result<(), String> {
+    fn insort_nodes() -> Result<(), String> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);
@@ -44,7 +44,7 @@ mod test_node {
     }
 
     #[test]
-    fn test_filter_nodes() -> Result<(), String> {
+    fn filter_nodes() -> Result<(), String> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);
@@ -62,7 +62,7 @@ mod test_node {
     }
 
     #[test]
-    fn test_resort_nodes() -> Result<(), String> {
+    fn resort_nodes() -> Result<(), String> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);

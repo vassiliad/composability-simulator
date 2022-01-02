@@ -1,6 +1,7 @@
 pub struct Resource {
     pub capacity: f32,
     pub current: f32,
+    num_allocate: u32,
     // pub lendable: f32,
 }
 
@@ -19,6 +20,25 @@ impl Resource {
             capacity: capacity,
             // lendable: lendable,
             current: capacity,
+            num_allocate: 0,
         })
     }
+    pub fn allocate(&mut self, value: f32) {
+        self.current -= value;
+        self.num_allocate += 1;
+
+        assert!(self.current >= 0.)
+    }
+
+    pub fn free(&mut self, value: f32) {
+        self.num_allocate -= 1;
+        if self.num_allocate == 0 {
+            self.current = self.capacity;
+            return
+        }
+        self.current += value;
+
+        assert!(self.current <= self.capacity)
+    }
+    
 }

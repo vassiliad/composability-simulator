@@ -78,22 +78,18 @@ impl Node {
     }
 
     pub fn allocate_cores(&mut self, cores: f32) {
-        self.cores.current -= cores;
-        assert!(self.cores.current >= 0.);
+        self.cores.allocate(cores)
     }
 
     pub fn allocate_memory(&mut self, memory: f32) {
-        self.memory.current -= memory;
-        assert!(self.memory.current >= 0.);
+        self.memory.allocate(memory)
     }
 
     pub fn free_memory(&mut self, memory: f32) {
-        self.memory.current += memory;
-        assert!(self.memory.current <= self.memory.capacity)
+        self.memory.free(memory)
     }
 
     pub fn free_cores(&mut self, cores: f32) {
-        self.cores.current += cores;
-        assert!(self.cores.current <= self.cores.capacity)
+        self.cores.free(cores)
     }
 }

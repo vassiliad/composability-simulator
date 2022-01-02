@@ -64,13 +64,13 @@ where
         self.registry.resort_nodes_cores(&all_idx_cores);
         self.registry.resort_nodes_memory(&all_idx_memory);
 
-        println!(
-            "Freeing {}x{} from cores {} and memory {:?}",
-            job.cores,
-            job.memory,
-            job.node_cores.unwrap(),
-            job.node_memory
-        );
+        // println!(
+        //     "Freeing {}x{} from cores {} and memory {:?}",
+        //     job.cores,
+        //     job.memory,
+        //     job.node_cores.unwrap(),
+        //     job.node_memory
+        // );
     }
 
     fn job_allocate(registry: &mut NodeRegistry, job: &mut Job) -> bool {
@@ -86,7 +86,7 @@ where
 
             idx_node = registry.sorted_cores[idx_cores];
             let node = &registry.nodes[idx_node];
-            println!("Can fit {}x{} to {}", job.cores, job.memory, node);
+            // println!("Can fit {}x{} to {}", job.cores, job.memory, node);
 
             // VV: Now find the idx of node in the sorted_memory array of indices
             let idx_memory = registry.idx_sorted_memory(node);
@@ -112,7 +112,7 @@ where
     pub fn tick(&mut self) -> bool {
         let mut next_tick: Option<f32> = None;
         let mut run_now: Vec<usize> = Vec::with_capacity(self.jobs_queuing.len().max(10).min(10));
-        println!("Now is {}", self.now);
+        // println!("Now is {}", self.now);
 
         loop {
             let mut new_queueing = 0;
@@ -123,19 +123,19 @@ where
                 let job = &self.jobs_running[0];
                 if job.time_done.unwrap() <= self.now {
                     let job = self.jobs_running.pop_front().unwrap();
-                    println!(
-                        "  Job {} that started on {} with duration {} finished",
-                        job.uid,
-                        job.time_started.unwrap(),
-                        job.duration
-                    );
+                    // println!(
+                    //     "  Job {} that started on {} with duration {} finished",
+                    //     job.uid,
+                    //     job.time_started.unwrap(),
+                    //     job.duration
+                    // );
 
                     assert_eq!(job.time_done.unwrap(), self.now);
 
                     self.job_free(job);
                     new_done += 1;
                 } else {
-                    println!("  NextRunning {}", job.time_done.unwrap());
+                    // println!("  NextRunning {}", job.time_done.unwrap());
                     next_tick = match next_tick {
                         Some(x) => Some(x.min(job.time_done.unwrap())),
                         None => job.time_done.clone(),
@@ -153,7 +153,7 @@ where
                             self.jobs_queuing.push_back(job);
                             new_queueing += 1;
                         } else {
-                            println!("  NextQueueing {}", job.time_created);
+                            // println!("  NextQueueing {}", job.time_created);
                             next_tick = match next_tick {
                                 Some(x) => Some(x.min(job.time_created)),
                                 None => Some(job.time_created.clone()),
