@@ -7,6 +7,7 @@ pub struct NodeRegistry {
     pub nodes: Vec<Node>,
     pub sorted_cores: Vec<usize>,
     pub sorted_memory: Vec<usize>,
+    pub connections: HashMap<usize, Vec<usize>>,
 }
 
 impl NodeRegistry {
@@ -16,15 +17,16 @@ impl NodeRegistry {
             nodes: vec![],
             sorted_cores: vec![],
             sorted_memory: vec![],
+            connections: HashMap::new(),
         };
     }
 
     pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
-        &mut self.nodes
+        return &mut self.nodes;
     }
 
     pub fn nodes_immut(&self) -> &Vec<Node> {
-        &self.nodes
+        return &self.nodes;
     }
 
     fn register_node(&mut self, name: &str) -> Result<usize, String> {
@@ -185,6 +187,108 @@ impl NodeRegistry {
             + idx_memory;
 
         idx_memory
+    }
+
+    pub fn new_connection_from_str(&mut self, line: &str) -> Result<(), String> {
+        // VV: format is <node_borrower:str>;[<lender1:str>;...<lender_n:str>]
+        // lenders might also be "*" (<node_borrowser:str>;*)
+        // in which case the borrower can borrow from *any* node
+        let tokens: Vec<_> = line.split(";").map(|x| x.trim()).collect();
+        let borrower;
+
+        if let Some(&c) = self.registry.get(tokens[0]) {
+            borrower = c;
+        } else {
+            return Err(format!("Unknown borrower name {}", tokens[0]));
+        }
+
+        let mut lenders: Vec<usize> = vec![];
+
+        let mut process_lender = |i: usize, v: &str| -> Result<(), String> {
+            if v.len() == 0 {
+                return Ok(());
+            }
+            if let Some(&c) = self.registry.get(v) {
+                if lenders.contains(&c) {
+                    return Err(format!("The {}th lender \"{}\" is repeated", i, v));
+                }
+                lenders.push(c);
+            } else {
+                return Err(format!("The {}th lender \"{}\" is unknown", i, v));
+            }
+            Ok(())
+        };
+
+        if tokens.len() == 2 {
+            if tokens[1] == "*" {
+                for v in self.registry.values() {
+                    if *v != borrower {
+                        lenders.push(*v);
+                    }
+                }
+            } else {
+                process_lender(1, tokens[1])?;
+            }
+        } else if tokens.len() > 2 {
+            for (i, v) in tokens.iter().skip(1).enumerate() {
+                process_lender(i, v)?;
+            }
+        }
+
+        self.new_connection(borrower, lenders)
+    }
+
+    pub fn new_connection(
+        &mut self,
+        uid_borrower: usize,
+        lenders: Vec<usize>,
+    ) -> Result<(), String> {
+        if uid_borrower >= self.nodes.len() {
+            return Err(format!("Borrower {} is an unknown UID", uid_borrower));
+        }
+
+        for uid_lender in &lenders {
+            if uid_lender >= &self.nodes.len() {
+                return Err(format!("Lender {} is an unknown UID", uid_lender));
+            }
+            if &uid_borrower == uid_lender {
+                return Err(format!("Borrower {} cannot borrow from itself", uid_lender));
+            }
+        }
+
+        self.connections.insert(uid_borrower, lenders);
+
+        Ok(())
+    }
+
+    pub fn new_node_from_str(&mut self, line: &str) -> Result<&Node, String> {
+        // VV: format is <name>;<cores>;<memory>
+        let tokens: Vec<_> = line.split(";").collect();
+
+        if tokens.len() != 3 {
+            return Err(format!(
+                "Expected that \"{}\" contained <name:str>;<cores:f32>;<memory:f32>",
+                line
+            ));
+        }
+
+        let name = tokens[0].trim();
+        let cores;
+        let memory;
+
+        if let Ok(c) = tokens[1].trim().parse() {
+            cores = c;
+        } else {
+            return Err(format!("Unable to parse {} into cores:f32", tokens[1]));
+        }
+
+        if let Ok(m) = tokens[2].trim().parse() {
+            memory = m;
+        } else {
+            return Err(format!("Unable to parse {} into memory:f32", tokens[2]));
+        }
+
+        self.new_node(name, cores, memory)
     }
 
     pub fn new_node(

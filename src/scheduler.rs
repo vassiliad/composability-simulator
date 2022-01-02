@@ -54,6 +54,10 @@ where
 
                 // VV: we know idx_memory, so now free memory
                 let node = &mut self.registry.nodes[idx_node];
+                println!(
+                    "Freeing {} memory from {} with max memory {}",
+                    memory, node.name, node.memory.capacity
+                );
                 node.free_memory(memory);
 
                 ret
@@ -102,23 +106,30 @@ where
         idx_memory: usize,
         job: &mut Job,
     ) -> bool {
-        let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
+        let uid_cores = registry.sorted_cores[idx_cores];
+        let lenders = registry.connections.get(&uid_cores).unwrap();
+        let all_memory: Vec<usize> = registry.sorted_memory
+            [idx_memory..registry.sorted_memory.len()]
+            .iter()
+            .filter_map(|x| if lenders.contains(x) { Some(*x) } else { None })
+            .collect();
+        // let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
         // VV: Assumes that *all* node scan steal memory from *any* other node
         let total_memory: f32 = all_memory
             .iter()
             .map(|idx: &usize| registry.nodes[*idx].memory.current)
-            .sum();
+            .sum::<f32>()
+            + registry.nodes[uid_cores].memory.current;
 
         if total_memory < job.memory {
-            print!("Not enough memory {} for {}", total_memory, job.memory);
+            // println!("Not enough memory {} for {} on {} from {:?} -- {:?}",
+            //     total_memory, job.memory, uid_cores, lenders, registry.connections);
             return false;
         }
 
         let mut indices_memory = vec![];
 
         let mut rem_mem = job.memory;
-
-        let uid_cores = registry.sorted_cores[idx_cores];
 
         registry.nodes[uid_cores].allocate_cores(job.cores);
 
@@ -136,11 +147,11 @@ where
         }
 
         let mut idx_memory = idx_memory;
-        for uid_mem in all_memory {
+        for uid_mem in &all_memory {
             if uid_mem != &uid_cores {
                 let node_mem = &registry.nodes[*uid_mem];
                 let alloc = rem_mem.min(node_mem.memory.current);
-                job.node_memory.push((idx_memory, alloc));
+                job.node_memory.push((*uid_mem, alloc));
 
                 indices_memory.push(idx_memory);
                 registry.nodes[*uid_mem].allocate_memory(alloc);
@@ -224,8 +235,6 @@ where
                     //     job.time_started.unwrap(),
                     //     job.duration
                     // );
-
-                    assert_eq!(job.time_done.unwrap(), self.now);
 
                     self.job_free(job);
                     new_done += 1;

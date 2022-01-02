@@ -75,8 +75,13 @@ mod test_scheduler {
     #[test]
     fn scheduler_dismem_small() -> Result<(), String> {
         let mut reg = NodeRegistry::new();
-        reg.new_node("CPU", 2.0, 0.0)?;
+        reg.new_node("CPU", 4.0, 0.0)?;
         reg.new_node("RAM", 0.0, 2.0)?;
+        reg.new_node("RAM but unusable", 0.0, 2.0)?;
+
+        reg.new_connection_from_str("CPU;RAM")?;
+        reg.new_connection_from_str("RAM;")?;
+
         let job_created: Vec<_> = vec![0.0, 1., 2., 3.];
 
         let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, true);
@@ -87,6 +92,29 @@ mod test_scheduler {
 
         assert!(sched.job_factory.jobs_done.len() == 4);
         assert_eq!(sched.now, 11.0);
+        Ok(())
+    }
+
+    #[test]
+    fn scheduler_dismem_small_with_2_lenders() -> Result<(), String> {
+        let mut reg = NodeRegistry::new();
+        reg.new_node("CPU", 3.0, 0.0)?;
+        reg.new_node("RAM", 0.0, 2.0)?;
+        reg.new_node("RAM more", 0.0, 2.0)?;
+
+        reg.new_connection_from_str("CPU;*")?;
+        reg.new_connection_from_str("RAM;")?;
+
+        let job_created: Vec<_> = vec![0.0, 1., 2., 3.];
+
+        let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, true);
+
+        let mut sched = Scheduler::new(reg, job_factory);
+
+        while sched.tick() {}
+
+        assert!(sched.job_factory.jobs_done.len() == 4);
+        assert_eq!(sched.now, 10.0);
         Ok(())
     }
 }
