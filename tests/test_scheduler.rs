@@ -1,3 +1,4 @@
+use dismem::job::reset_job_metadata;
 use dismem::job::Job;
 use dismem::job_factory::JobCollection;
 use dismem::registry::NodeRegistry;
@@ -28,9 +29,14 @@ mod test_scheduler {
         duration: f32,
         can_borrow: bool,
     ) -> JobCollection {
+        reset_job_metadata();
+
         let jobs: Vec<_> = jobs_created
             .iter()
-            .map(|created| Job::new(cores, memory, duration, can_borrow, *created))
+            .enumerate()
+            .map(|(uid, created)| {
+                Job::new_with_uid(uid, cores, memory, duration, can_borrow, *created)
+            })
             .collect();
 
         JobCollection::new(jobs)

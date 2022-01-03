@@ -1,5 +1,9 @@
 use crate::node::Node;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::path::{self, Path};
 pub type UIDFactory = HashMap<String, usize>;
 
 pub struct NodeRegistry {
@@ -19,6 +23,73 @@ impl NodeRegistry {
             sorted_memory: vec![],
             connections: HashMap::new(),
         };
+    }
+
+    pub fn load_nodes(&mut self, path: &Path) -> Result<(), String> {
+        let file = File::open(path);
+
+        if let Err(x) = file {
+            return Err(format!(
+                "Unable to open node_definitions file {} because of {:?}",
+                path.display(),
+                x
+            ));
+        }
+
+        let br = BufReader::new(file.unwrap());
+
+        for (i, x) in br.lines().enumerate() {
+            if let Err(err) = x {
+                return Err(format!("Unable to read line {} because of {}", i, err));
+            }
+
+            let line = x.unwrap();
+            let line = line.trim();
+
+            if line.len() > 0 && line.starts_with("#") == false {
+                self.new_node_from_str(line)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn load_connections(&mut self, path: &Path) -> Result<(), String> {
+        let file = File::open(path);
+
+        if let Err(x) = file {
+            return Err(format!(
+                "Unable to open node_connections file {} because of {:?}",
+                path.display(),
+                x
+            ));
+        }
+
+        let br = BufReader::new(file.unwrap());
+
+        for (i, x) in br.lines().enumerate() {
+            if let Err(err) = x {
+                return Err(format!("Unable to read line {} because of {}", i, err));
+            }
+
+            let line = x.unwrap();
+            let line = line.trim();
+
+            if line.len() > 0 && line.starts_with("#") == false {
+                self.new_connection_from_str(line)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn from_paths(path_nodes: &Path, path_connections: &Path) -> Result<Self, String> {
+        let mut reg = Self::new();
+
+        reg.load_nodes(path_nodes)?;
+        reg.load_connections(path_connections)?;
+
+        Ok(reg)
     }
 
     pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
@@ -176,10 +247,9 @@ impl NodeRegistry {
         let uid = node.uid;
 
         let pred_memory = |node: &Node| -> bool { node.memory.current < memory_target };
-
-        let idx_memory = self.index_bisect_right(&self.sorted_memory, pred_memory, None, None);
-
         let sorted_memory = &self.sorted_memory;
+        let idx_memory = self.index_bisect_right(sorted_memory, pred_memory, None, None);
+
         let idx_memory = sorted_memory[idx_memory..sorted_memory.len()]
             .iter()
             .position(|idx: &usize| self.nodes[*idx].uid == uid)
@@ -263,26 +333,27 @@ impl NodeRegistry {
 
     pub fn new_node_from_str(&mut self, line: &str) -> Result<&Node, String> {
         // VV: format is <name>;<cores>;<memory>
-        let tokens: Vec<_> = line.split(";").collect();
+        let tokens: Vec<_> = line.split(";").map(|s| s.trim()).collect();
 
         if tokens.len() != 3 {
             return Err(format!(
-                "Expected that \"{}\" contained <name:str>;<cores:f32>;<memory:f32>",
-                line
+                "Expected that \"{}\" contained <name:str>;<cores:f32>;<memory:f32>, \
+                instead got {:?}",
+                line, tokens
             ));
         }
 
-        let name = tokens[0].trim();
+        let name = tokens[0];
         let cores;
         let memory;
 
-        if let Ok(c) = tokens[1].trim().parse() {
+        if let Ok(c) = tokens[1].parse() {
             cores = c;
         } else {
             return Err(format!("Unable to parse {} into cores:f32", tokens[1]));
         }
 
-        if let Ok(m) = tokens[2].trim().parse() {
+        if let Ok(m) = tokens[2].parse() {
             memory = m;
         } else {
             return Err(format!("Unable to parse {} into memory:f32", tokens[2]));
