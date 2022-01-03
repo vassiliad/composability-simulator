@@ -1,11 +1,44 @@
+use std::env::args;
+use std::path::Path;
+
+mod job;
+mod job_factory;
+
 mod node;
 mod registry;
 mod resource;
 
-fn main() -> Result<(), String> {
-    let mut reg = registry::NodeRegistry::new();
+mod scheduler;
 
-    let n = reg.new_node("test", 1.0, 1. /*, 1.*/)?;
-    println!("{}", n);
+fn main() -> Result<(), String> {
+    let arguments: Vec<_> = args().collect();
+
+    if arguments.len() != 1 + 3 {
+        return Err(format!(
+            "Expected arguments:
+            <path to node definition> \
+            <path to node connection definition> \
+            <path to job definition>"
+        ));
+    }
+
+    let path_nodes = Path::new(&arguments[1]);
+    let path_connections = Path::new(&arguments[2]);
+    let path_jobs = Path::new(&arguments[3]);
+
+    let registry = registry::NodeRegistry::from_paths(path_nodes, path_connections)?;
+
+    let jfactory = job_factory::JobStreaming::from_path(path_jobs)?;
+
+    let mut sched = scheduler::Scheduler::new(registry, jfactory);
+
+    while sched.tick() {}
+
+    println!(
+        "Scheduled {} jobs in simulated seconds {}",
+        sched.jobs_done.len(),
+        sched.now
+    );
+
     Ok(())
 }

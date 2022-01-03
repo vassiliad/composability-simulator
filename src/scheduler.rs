@@ -13,9 +13,9 @@ where
     pub job_factory: T,
     pub now: f32,
 
-    jobs_queuing: VecDeque<Job>,
-    jobs_running: VecDeque<Job>,
-    jobs_done: HashSet<usize>,
+    pub jobs_queuing: VecDeque<Job>,
+    pub jobs_running: VecDeque<Job>,
+    pub jobs_done: HashSet<usize>,
 }
 
 impl<T> Scheduler<T>
@@ -34,13 +34,20 @@ where
     }
 
     fn job_free(&mut self, job: Job) {
+        // println!(
+        //     "Freeing {}x{} from cores {} and memory {:?}",
+        //     job.cores,
+        //     job.memory,
+        //     job.node_cores.unwrap(),
+        //     job.node_memory
+        // );
+
         self.jobs_done.insert(job.uid);
         self.job_factory.job_mark_done(&job);
 
         let idx_node = job.node_cores.unwrap();
-        let node = &self.registry.nodes[idx_node];
 
-        let all_idx_cores = vec![self.registry.idx_sorted_cores(node)];
+        let all_idx_cores = vec![idx_node];
         // VV: after finding the index of the node in the sorted_cores array
         // it's now safe to free cores
         self.registry.nodes[idx_node].free_cores(job.cores);
@@ -49,31 +56,19 @@ where
             .node_memory
             .iter()
             .map(|&(idx_node, memory)| {
-                let node = &self.registry.nodes[idx_node];
-                let ret = self.registry.idx_sorted_memory(node);
-
-                // VV: we know idx_memory, so now free memory
                 let node = &mut self.registry.nodes[idx_node];
-                println!(
-                    "Freeing {} memory from {} with max memory {}",
-                    memory, node.name, node.memory.capacity
-                );
+                // println!(
+                //     "Freeing {} memory from {} with max memory {}",
+                //     memory, node.name, node.memory.capacity
+                // );
                 node.free_memory(memory);
 
-                ret
+                idx_node
             })
             .collect();
 
         self.registry.resort_nodes_cores(&all_idx_cores);
         self.registry.resort_nodes_memory(&all_idx_memory);
-
-        // println!(
-        //     "Freeing {}x{} from cores {} and memory {:?}",
-        //     job.cores,
-        //     job.memory,
-        //     job.node_cores.unwrap(),
-        //     job.node_memory
-        // );
     }
 
     fn job_allocate_on_single_node(
@@ -87,7 +82,7 @@ where
         // VV: finally, actually allocate the job on the node
         let node = &mut registry.nodes[idx_node];
 
-        println!("Can fit {}x{} to {}", job.cores, job.memory, node);
+        // println!("Can fit {}x{} to {}", job.cores, job.memory, node);
 
         node.allocate_job(job.cores, job.memory);
 
@@ -138,22 +133,20 @@ where
 
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
-            let this_mem_idx = registry.idx_sorted_memory(&node_cores);
-            job.node_memory.push((this_mem_idx, alloc));
-            indices_memory.push(this_mem_idx);
+            job.node_memory.push((uid_cores, alloc));
+            indices_memory.push(uid_cores);
 
             registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
         }
 
-        let mut idx_memory = idx_memory;
         for uid_mem in &all_memory {
             if uid_mem != &uid_cores {
                 let node_mem = &registry.nodes[*uid_mem];
                 let alloc = rem_mem.min(node_mem.memory.current);
                 job.node_memory.push((*uid_mem, alloc));
 
-                indices_memory.push(idx_memory);
+                indices_memory.push(*uid_mem);
                 registry.nodes[*uid_mem].allocate_memory(alloc);
                 rem_mem -= alloc;
 
@@ -161,9 +154,10 @@ where
                     break;
                 }
             }
-
-            idx_memory += 1;
         }
+
+        // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
+        // job.cores, job.memory, job.node_cores, job.node_memory);
 
         registry.resort_nodes_cores(&vec![idx_cores]);
         registry.resort_nodes_memory(&indices_memory);
