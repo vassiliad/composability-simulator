@@ -1,0 +1,12 @@
+# borrower; lender
+# First rack, 4 CPU nodes 1 RAM "server"
+CPU_0_0; RAM_0
+CPU_0_1; RAM_0
+CPU_0_2; RAM_0
+CPU_0_3; RAM_0
+
+# Second rack, similar to 1 in terms of connectivity
+CPU_1_0; RAM_1
+CPU_1_1; RAM_1
+CPU_1_2; RAM_1
+CPU_1_3; RAM_1

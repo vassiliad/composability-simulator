@@ -1,0 +1,15 @@
+#name;      Cores; Memory
+# First rack
+RAM_0;      0.0;   16.0
+CPU_0_0;    4.0;   4.0
+CPU_0_1;    4.0;   4.0
+CPU_0_2;    4.0;   4.0
+CPU_0_3;    4.0;   4.0
+
+# Second rack has more Cores and more Ram
+
+RAM_1;      0.0;   32.0
+CPU_1_0;    8.0;   4.0
+CPU_1_1;    8.0;   4.0
+CPU_1_2;    8.0;   4.0
+CPU_1_3;    8.0;   4.0
