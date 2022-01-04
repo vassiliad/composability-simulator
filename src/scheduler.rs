@@ -1,3 +1,22 @@
+/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/
+
 use crate::job::Job;
 use crate::job_factory::JobFactory;
 use crate::registry::NodeRegistry;
@@ -45,42 +64,37 @@ where
         self.jobs_done.insert(job.uid);
         self.job_factory.job_mark_done(&job);
 
-        let idx_node = job.node_cores.unwrap();
+        let uid_cores = job.node_cores.unwrap();
 
-        let all_idx_cores = vec![idx_node];
+        let all_uids_cores = vec![uid_cores];
         // VV: after finding the index of the node in the sorted_cores array
         // it's now safe to free cores
-        self.registry.nodes[idx_node].free_cores(job.cores);
+        self.registry.nodes[uid_cores].free_cores(job.cores);
 
-        let all_idx_memory: Vec<usize> = job
+        let all_uids_memory: Vec<usize> = job
             .node_memory
             .iter()
-            .map(|&(idx_node, memory)| {
-                let node = &mut self.registry.nodes[idx_node];
+            .map(|&(uid_memory, memory)| {
+                let node = &mut self.registry.nodes[uid_memory];
                 // println!(
                 //     "Freeing {} memory from {} with max memory {}",
                 //     memory, node.name, node.memory.capacity
                 // );
                 node.free_memory(memory);
 
-                idx_node
+                uid_memory
             })
             .collect();
 
-        self.registry.resort_nodes_cores(&all_idx_cores);
-        self.registry.resort_nodes_memory(&all_idx_memory);
+        self.registry.resort_nodes_cores(&all_uids_cores);
+        self.registry.resort_nodes_memory(&all_uids_memory);
     }
 
-    fn job_allocate_on_single_node(
-        registry: &mut NodeRegistry,
-        idx_cores: usize,
-        idx_memory: usize,
-        job: &mut Job,
-    ) {
-        let idx_node = registry.sorted_cores[idx_cores];
+    fn job_allocate_on_single_node(registry: &mut NodeRegistry, idx_cores: usize, job: &mut Job) {
+        let uid_node = registry.sorted_cores[idx_cores];
 
         // VV: finally, actually allocate the job on the node
-        let node = &mut registry.nodes[idx_node];
+        let node = &mut registry.nodes[uid_node];
 
         // println!("Can fit {}x{} to {}", job.cores, job.memory, node);
 
@@ -91,8 +105,8 @@ where
         // VV: and then re-sort the sorted_cores and sorted_memory indices of
         // the registry. This ensures that the next allocation will find
         // the nodes in proper order.
-        registry.resort_nodes_cores(&vec![idx_cores]);
-        registry.resort_nodes_memory(&vec![idx_memory]);
+        registry.resort_nodes_cores(&vec![uid_node]);
+        registry.resort_nodes_memory(&vec![uid_node]);
     }
 
     fn job_allocate_on_many_nodes(
@@ -122,7 +136,7 @@ where
             return false;
         }
 
-        let mut indices_memory = vec![];
+        let mut uids_memory = vec![];
 
         let mut rem_mem = job.memory;
 
@@ -134,7 +148,7 @@ where
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
             job.node_memory.push((uid_cores, alloc));
-            indices_memory.push(uid_cores);
+            uids_memory.push(uid_cores);
 
             registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
@@ -146,7 +160,7 @@ where
                 let alloc = rem_mem.min(node_mem.memory.current);
                 job.node_memory.push((*uid_mem, alloc));
 
-                indices_memory.push(*uid_mem);
+                uids_memory.push(*uid_mem);
                 registry.nodes[*uid_mem].allocate_memory(alloc);
                 rem_mem -= alloc;
 
@@ -159,8 +173,8 @@ where
         // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
         // job.cores, job.memory, job.node_cores, job.node_memory);
 
-        registry.resort_nodes_cores(&vec![idx_cores]);
-        registry.resort_nodes_memory(&indices_memory);
+        registry.resort_nodes_cores(&vec![uid_cores]);
+        registry.resort_nodes_memory(&uids_memory);
 
         assert_eq!(rem_mem, 0.0);
 
@@ -183,10 +197,8 @@ where
             let mut idx_cores = cores;
 
             for uid_cores in all_cores {
-                if let Some(idx_inner) = all_memory.iter().position(|uid: &usize| uid == uid_cores)
-                {
-                    let idx_memory = idx_inner + memory;
-                    Self::job_allocate_on_single_node(registry, idx_cores, idx_memory, job);
+                if let Some(_) = all_memory.iter().position(|uid: &usize| uid == uid_cores) {
+                    Self::job_allocate_on_single_node(registry, idx_cores, job);
                     return true;
                 }
 
