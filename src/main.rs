@@ -32,7 +32,15 @@ fn main() -> Result<(), String> {
 
     let mut sched = scheduler::Scheduler::new(registry, jfactory);
 
-    while sched.tick() {}
+    let mut last_report: usize = 0;
+    let report_every = 1000;
+    while sched.tick() {
+
+        if sched.jobs_done.len() >= report_every + last_report {
+            last_report = sched.jobs_done.len();
+            println!("Jobs finished {} on {}", last_report, sched.now);
+        }
+    }
 
     println!(
         "Scheduled {} jobs in simulated seconds {}",
