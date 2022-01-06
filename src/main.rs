@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use std::time::SystemTime;
 use std::env::args;
 use std::path::Path;
 
@@ -45,18 +46,36 @@ fn main() -> Result<(), String> {
     let path_connections = Path::new(&arguments[2]);
     let path_jobs = Path::new(&arguments[3]);
 
+    println!("Instantianting node registry");
     let registry = registry::NodeRegistry::from_paths(path_nodes, path_connections)?;
 
+    println!("Instantianting job factory");
     let jfactory = job_factory::JobStreaming::from_path(path_jobs)?;
 
+
+    println!("Instantianting scheduler");
     let mut sched = scheduler::Scheduler::new(registry, jfactory);
 
+    
+    println!("Starting simulation");
     let mut last_report: usize = 0;
     let report_every = 1000;
+    let report_every_secs = 5.0;
+    let mut last_report_time = SystemTime::now();
+    let start = last_report_time.clone();
+    
     while sched.tick() {
-        if sched.jobs_done.len() >= report_every + last_report {
+        let now = SystemTime::now();
+        let delta = now.duration_since(last_report_time).unwrap();
+        
+        if (delta.as_secs_f32() > report_every_secs) || (sched.jobs_done.len() >= report_every + last_report) {
             last_report = sched.jobs_done.len();
-            println!("Jobs finished {} on {}", last_report, sched.now);
+            last_report_time = now;
+            
+            let delta = now.duration_since(start).unwrap();
+            println!("{:#?}) At tick {}, finished: {} - running: {} - queueing: {}", 
+                delta, sched.now, last_report, sched.jobs_running.len(), 
+                sched.jobs_queuing.len());
         }
     }
 

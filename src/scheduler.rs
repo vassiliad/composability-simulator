@@ -16,17 +16,17 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::time::SystemTime;
 
 use crate::job::Job;
 use crate::job_factory::JobFactory;
 use crate::registry::NodeRegistry;
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use std::vec;
 
 pub struct Scheduler<T>
-where
-    T: JobFactory,
+    where
+        T: JobFactory,
 {
     pub registry: NodeRegistry,
     pub job_factory: T,
@@ -38,8 +38,8 @@ where
 }
 
 impl<T> Scheduler<T>
-where
-    T: JobFactory,
+    where
+        T: JobFactory,
 {
     pub fn new(registry: NodeRegistry, job_factory: T) -> Self {
         Self {
@@ -226,6 +226,9 @@ where
         let mut run_now: Vec<usize> = Vec::with_capacity(self.jobs_queuing.len().max(10).min(10));
         // println!("Now is {}", self.now);
 
+        let max_secs = 5.0;
+        let tick_started = SystemTime::now();
+
         loop {
             let mut new_queueing = 0;
             let new_running;
@@ -255,6 +258,10 @@ where
                 }
             }
 
+            let orig_queueing = self.jobs_queuing.len();
+            // VV: Only add up to 100 jobs per loop so that simulator 
+            // has more chances to print out periodic reports
+            let max_new_queuing = 100;
             loop {
                 match self.job_factory.job_peek() {
                     Some(job) => {
@@ -273,11 +280,24 @@ where
                     }
                     None => break,
                 }
+
+                if new_queueing == max_new_queuing {
+                    break;
+                }
             }
 
-            for (i, job) in self.jobs_queuing.iter_mut().enumerate() {
+            let skip;
+            if new_done > 0 {
+                skip = 0;
+            } else {
+                // VV: No jobs finished during this iteration of the current tick, no need to re-process
+                // the first few orig_queueing jobs, just the ones that this iteration discovered
+                skip = orig_queueing;
+            }
+
+            for (i, job) in self.jobs_queuing.iter_mut().skip(skip).enumerate() {
                 if Self::job_allocate(&mut self.registry, job) {
-                    run_now.push(i);
+                    run_now.push(i + skip);
                 }
             }
 
@@ -309,6 +329,13 @@ where
 
             if new_queueing + new_running + new_done == 0 {
                 break;
+            }
+
+            // VV: if this tick is taking longer than 5 secs to process then bail out
+            // whoever is running the simulator might wish to print something to the terminal
+            let going_for = SystemTime::now().duration_since(tick_started).unwrap();
+            if going_for.as_secs_f32() > max_secs {
+                return true;
             }
         }
 
