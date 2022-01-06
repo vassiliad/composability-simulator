@@ -24,12 +24,10 @@ use crate::job::Job;
 use crate::job_factory::JobFactory;
 use crate::registry::NodeRegistry;
 
-pub struct Scheduler<T>
-    where
-        T: JobFactory,
+pub struct Scheduler
 {
     pub registry: NodeRegistry,
-    pub job_factory: T,
+    pub job_factory: Box<dyn JobFactory>,
     pub now: f32,
 
     pub jobs_queuing: VecDeque<Job>,
@@ -37,11 +35,9 @@ pub struct Scheduler<T>
     pub jobs_done: HashSet<usize>,
 }
 
-impl<T> Scheduler<T>
-    where
-        T: JobFactory,
+impl Scheduler
 {
-    pub fn new(registry: NodeRegistry, job_factory: T) -> Self {
+    pub fn new(registry: NodeRegistry, job_factory: Box<dyn JobFactory>) -> Self {
         Self {
             registry,
             job_factory,

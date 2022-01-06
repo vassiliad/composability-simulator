@@ -37,7 +37,7 @@ mod test_job_factory {
             factory.job_mark_done(&job);
         }
 
-        assert_eq!(factory.jobs_done.len(), 2);
+        assert_eq!(factory.jobs_done().len(), 2);
 
         Ok(())
     }
