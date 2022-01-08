@@ -19,6 +19,7 @@ under the License.
 
 use std::env::args;
 use std::path::Path;
+use std::time::SystemTime;
 
 mod job;
 mod job_factory;
@@ -32,12 +33,13 @@ mod scheduler;
 fn main() -> Result<(), String> {
     let arguments: Vec<_> = args().collect();
 
-    if arguments.len() != 1 + 3 {
+    if arguments.len() < 1 + 3 || arguments.len() > 1 + 3 + 1 {
         return Err(format!(
-            "Expected arguments:
+            "Expected arguments: \
             <path to node definition> \
             <path to node connection definition> \
-            <path to job definition>"
+            <path to job definition> \
+            [<path to output file for output trace>]"
         ));
     }
 
@@ -45,26 +47,50 @@ fn main() -> Result<(), String> {
     let path_connections = Path::new(&arguments[2]);
     let path_jobs = Path::new(&arguments[3]);
 
+    println!("Instantiating node registry");
     let registry = registry::NodeRegistry::from_paths(path_nodes, path_connections)?;
 
-    let jfactory = job_factory::JobStreaming::from_path(path_jobs)?;
-
-    let mut sched = scheduler::Scheduler::new(registry, jfactory);
-
-    let mut last_report: usize = 0;
-    let report_every = 1000;
-    while sched.tick() {
-        if sched.jobs_done.len() >= report_every + last_report {
-            last_report = sched.jobs_done.len();
-            println!("Jobs finished {} on {}", last_report, sched.now);
-        }
+    println!("Instantiating job factory");
+    let jfactory: Box<dyn job_factory::JobFactory>;
+    if arguments.len() == 1 + 3 {
+        let jf = job_factory::JobStreaming::from_path(path_jobs)?;
+        jfactory = Box::new(jf);
+    } else {
+        let path_output_trace = Path::new(&arguments[4]);
+        let jf = job_factory::JobStreamingWithOutput::from_path_to_path(
+            path_jobs, path_output_trace)?;
+        jfactory = Box::new(jf);
     }
 
-    println!(
-        "Scheduled {} jobs in simulated seconds {}",
-        sched.jobs_done.len(),
-        sched.now
-    );
+    println!("Instantiating scheduler");
+    let mut sched = scheduler::Scheduler::new(registry, jfactory);
 
+
+    println!("Starting simulation");
+    let mut last_report: usize = 0;
+    let report_every = 1000;
+    let report_every_secs = 5.0;
+    let mut last_report_time = SystemTime::now();
+    let start = last_report_time.clone();
+
+    while sched.tick() {
+        let now = SystemTime::now();
+        let delta = now.duration_since(last_report_time).unwrap();
+
+        if (delta.as_secs_f32() > report_every_secs) || (sched.jobs_done.len() >= report_every + last_report) {
+            last_report = sched.jobs_done.len();
+            last_report_time = now;
+
+            let delta = now.duration_since(start).unwrap();
+            println!("{:#?}) At tick {}, finished: {} - running: {} - queueing: {}",
+                     delta, sched.now, last_report, sched.jobs_running.len(),
+                     sched.jobs_queuing.len());
+        }
+    }
+    let delta = SystemTime::now().duration_since(start).unwrap();
+
+    println!(
+        "{}) Scheduled {} jobs in simulated seconds {}",
+        delta.as_secs_f32(), sched.jobs_done.len(), sched.now);
     Ok(())
 }

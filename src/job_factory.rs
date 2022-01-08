@@ -17,30 +17,40 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use crate::job::reset_job_metadata;
-use crate::job::Job;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::io::Cursor;
+use std::io::Write;
 use std::path::Path;
+use std::ptr::write;
+
+use crate::job::Job;
+use crate::job::reset_job_metadata;
 
 pub trait JobFactory {
     fn job_peek(&self) -> Option<&Job>;
     fn job_get(&mut self) -> Job;
     fn job_mark_done(&mut self, _job: &Job) {}
     fn more_jobs(&self) -> bool;
+    fn jobs_done(&self) -> &Vec<usize>;
 }
 
 pub struct JobStreaming {
     pub reader: Box<dyn BufRead>,
-    pub jobs_done: Vec<usize>,
+    jobs_done: Vec<usize>,
     next_job: Option<Job>,
 }
 
+pub struct JobStreamingWithOutput {
+    pub inner: JobStreaming,
+    pub writer: Box<dyn Write>,
+}
+
 pub struct JobCollection {
-    pub jobs_done: Vec<usize>,
+    jobs_done: Vec<usize>,
     pub jobs: VecDeque<Job>,
 }
 
@@ -61,6 +71,10 @@ impl JobFactory for JobCollection {
 
     fn more_jobs(&self) -> bool {
         self.jobs.len() > 0
+    }
+
+    fn jobs_done(&self) -> &Vec<usize> {
+        &self.jobs_done
     }
 }
 
@@ -132,6 +146,54 @@ impl JobStreaming {
     }
 }
 
+impl JobStreamingWithOutput {
+    fn make_writer(path: &Path) -> Result<Box<dyn Write>, String> {
+        let file = File::create(path);
+        if let Err(x) = file {
+            return Err(format!(
+                "Unable to create file \"{}\" because: {:?}",
+                path.display(),
+                x
+            ));
+        }
+
+        let mut writer = Box::new(BufWriter::new(file.unwrap())) as Box<dyn Write>;
+        if let Err(x) = writeln!(writer, "#uid:usize;cores:f32;memory:f32;duration:f32;\
+            can_borrow:y/n;time_created:f32;time_started:f32;time_done:f32;uid_node_cores:usize;\
+            [uid_node_memory:usize;memory_alloc:f32]+") {
+            return Err(format!("Unable to write header to path {} because of {:?}",
+                               path.display(), x));
+        }
+        Ok(writer)
+    }
+
+    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self, String> {
+        let file = File::open(path);
+        if let Err(x) = file {
+            return Err(format!(
+                "Unable to open file \"{}\" because: {:?}",
+                path.display(),
+                x
+            ));
+        }
+
+        let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
+
+        Self::from_reader_to_path(reader, output_path)
+    }
+
+    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self, String> {
+        let reader = Box::new(Cursor::new(content));
+        Self::from_reader_to_path(reader, output_path)
+    }
+
+    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self, String> {
+        let inner = JobStreaming::from_reader(reader);
+        let writer = JobStreamingWithOutput::make_writer(output_path)?;
+        Ok(Self {inner, writer})
+    }
+}
+
 impl JobFactory for JobStreaming {
     fn job_peek(&self) -> Option<&Job> {
         match &self.next_job {
@@ -140,7 +202,7 @@ impl JobFactory for JobStreaming {
         }
     }
 
-    /// Consumes job and also reads the next availale job definition from the stream
+    /// Consumes job and also reads the next available job definition from the stream
     fn job_get(&mut self) -> Job {
         let cur_job = std::mem::replace(&mut self.next_job, None).unwrap();
         self.may_read_line();
@@ -154,5 +216,41 @@ impl JobFactory for JobStreaming {
 
     fn more_jobs(&self) -> bool {
         self.next_job.is_some()
+    }
+
+    fn jobs_done(&self) -> &Vec<usize> {
+        &self.jobs_done
+    }
+}
+
+
+impl JobFactory for JobStreamingWithOutput {
+    fn job_peek(&self) -> Option<&Job> {
+        self.inner.job_peek()
+    }
+
+    fn job_get(&mut self) -> Job {
+        self.inner.job_get()
+    }
+
+    fn job_mark_done(&mut self, job: &Job) {
+        self.inner.jobs_done.push(job.uid);
+        write!(self.writer, "{};{};{};{};{};{};{};{};{}",
+               job.uid, job.cores, job.memory, job.duration, if job.can_borrow {'y'} else {'n'},
+               job.time_created, job.time_started.unwrap(), job.time_done.unwrap(),
+               job.node_cores.unwrap()).unwrap();
+
+        for (node, mem) in &job.node_memory {
+            write!(self.writer, ";{};{}", node, mem).unwrap();
+        }
+        writeln!(self.writer, "").unwrap();
+    }
+
+    fn more_jobs(&self) -> bool {
+        self.inner.more_jobs()
+    }
+
+    fn jobs_done(&self) -> &Vec<usize> {
+        &self.inner.jobs_done
     }
 }
