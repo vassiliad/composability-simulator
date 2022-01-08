@@ -183,7 +183,9 @@ fn extract_tasks_from_traces<P: AsRef<Path>>(path_to_root: P, path_output: P) ->
 
         println!("  ! Earliest pending {}, earliest running {}",
                  earliest_unsheduled, earliest_running);
-        println!("{:#?}", book[0]);
+        if book.len() > 0 {
+            println!("Earliest task {:#?}", book[0]);
+        }
 
         if stop_processing.lock().unwrap().load(Ordering::SeqCst) {
             println!("Stop processing new task events due to SIG INT");
@@ -211,6 +213,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
     let file = File::open(&path)
         .context(format!("Unable to open input file {}", path.display()))?;
 
+    let mut latest = 0.0;
     let br = BufReader::new(file);
     for (i, line) in br.lines().enumerate() {
         let line = line
@@ -250,7 +253,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
                 .parse::<f64>()
                 .with_context(|| format!("Unable to parse timestamp from line {} = {} of {}",
                                          i, line, path.display()))?;
-            let timestamp = (timestamp / 1e9) as f32;
+            let timestamp = (timestamp / 1e6) as f32;
 
             Ok(timestamp)
         };
@@ -276,7 +279,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
                 // VV: Tasks may be re-submit it, for the sake of simplicity
                 // get rid of them
                 let timestamp = timestamp()?;
-
+                latest = timestamp;
                 if draft.contains_key(&key) {
                     num_dropped_tasks += 1;
                     draft.remove(&key);
@@ -321,6 +324,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
                 let mut task = draft.get_mut(&key).unwrap();
 
                 task.time_started = timestamp()?;
+                latest = task.time_started;
             }
 
             TaskEvent::Kill | TaskEvent::Evict | TaskEvent::Finish | TaskEvent::Fail => {
@@ -337,6 +341,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
                 }
 
                 task.time_done = timestamp()?;
+                latest = task.time_done;
 
                 let idx = book.partition_point(|t| {
                     t.time_created < task.time_created
@@ -351,11 +356,47 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
                 // VV: bb incomplete task definition, or task definition who decided to change
                 // you will be missed but never forgotten.
                 draft.remove(&key);
+
+                latest = timestamp()?;
             }
         }
     }
 
+    // VV: if there're any weird tasks PENDING for over 8 hours throw those out
+    // VV: If there're any weird tasks RUNNING for longer than 24 hours then mark them as done
 
+    let mut removed: Vec<(usize, usize)> = vec![];
+
+    for (key, task) in draft.iter_mut() {
+        if task.time_started == -1. {
+            if latest - task.time_created > (8 * 3600) as f32 {
+                removed.push(*key);
+            }
+        } else if task.time_done == -1.0 {
+            if latest - task.time_started > (24 * 3600) as f32 {
+                task.time_done = latest;
+                removed.push(*key);
+            }
+        } else {
+            panic!("Task {:#?} should have been moved to book already", task);
+        }
+    }
+
+    for key in &removed {
+        if let Some(task) = draft.remove(key) {
+            if task.time_done != -1.0 {
+                let idx = book.partition_point(|t| {
+                    t.time_created < task.time_created
+                });
+
+                num_full_tasks += 1;
+                book.insert(idx, task);
+            }
+        }
+    }
+
+    println!("   Simulated time is currently: {}", latest);
+    num_dropped_tasks += removed.len();
     Ok((num_full_tasks, num_dropped_tasks))
 }
 
