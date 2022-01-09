@@ -244,6 +244,7 @@ impl JobFactory for JobStreamingWithOutput {
             write!(self.writer, ";{};{}", node, mem).unwrap();
         }
         writeln!(self.writer, "").unwrap();
+        self.writer.flush().unwrap();
     }
 
     fn more_jobs(&self) -> bool {

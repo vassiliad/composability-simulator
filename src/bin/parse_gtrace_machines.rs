@@ -167,7 +167,7 @@ fn main() -> Result<()> {
         if parent.exists() == false {
             create_dir_all(parent)
                 .context(format!("Unable to create directory for output files {}",
-                                 parent.display()));
+                                 parent.display()))?;
         }
     }
     let out_prefix = arguments.output_file_prefix.to_str().unwrap();
@@ -216,8 +216,8 @@ fn main() -> Result<()> {
             writeln!(&mut out_connections, "{};{}", name, pool_name);
         }
 
-        writeln!(&mut out_nodes, "");
-        writeln!(&mut out_connections, "");
+        writeln!(&mut out_nodes, "")?;
+        writeln!(&mut out_connections, "")?;
 
         if terminate {
             break;

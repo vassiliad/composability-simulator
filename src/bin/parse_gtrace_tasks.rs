@@ -15,8 +15,6 @@ use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
 
-use crate::TaskEvent::{Schedule, Submit};
-
 #[derive(Debug)]
 struct TaskDef {
     time_created: f32,
