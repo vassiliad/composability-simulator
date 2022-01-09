@@ -17,12 +17,14 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use crate::node::Node;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::path::{self, Path};
+
+use crate::node::Node;
+
 pub type UIDFactory = HashMap<String, usize>;
 
 pub struct NodeRegistry {
@@ -137,8 +139,8 @@ impl NodeRegistry {
         lo: Option<usize>,
         hi: Option<usize>,
     ) -> usize
-    where
-        FCompareNodes: Fn(&Node) -> bool,
+        where
+            FCompareNodes: Fn(&Node) -> bool,
     {
         let lo = lo.or(Some(0)).unwrap();
         let hi = hi.or(Some(indices.len())).unwrap();
@@ -165,7 +167,7 @@ impl NodeRegistry {
         self.sorted_memory.insert(idx, node.uid);
     }
 
-    pub fn nodes_sorted_cores(&self, at_least: f32) -> impl Iterator<Item = &Node> {
+    pub fn nodes_sorted_cores(&self, at_least: f32) -> impl Iterator<Item=&Node> {
         let cores_at_least = |n: &Node| -> bool { n.cores.current < at_least };
         let idx = self.index_bisect_right(&self.sorted_cores, cores_at_least, None, None);
 
@@ -217,7 +219,7 @@ impl NodeRegistry {
         self.sorted_memory.append(&mut new_memory);
     }
 
-    pub fn nodes_sorted_memory(&self, at_least: f32) -> impl Iterator<Item = &Node> {
+    pub fn nodes_sorted_memory(&self, at_least: f32) -> impl Iterator<Item=&Node> {
         let memory_at_least = |n: &Node| -> bool { n.memory.current < at_least };
         let idx = self.index_bisect_right(&self.sorted_memory, memory_at_least, None, None);
 
@@ -397,5 +399,32 @@ impl NodeRegistry {
         self.nodes.push(node);
 
         Ok(&self.nodes[uid])
+    }
+
+    pub fn avl_memory_to_node_uid(&self, uid: usize, own_memory: f32) -> f32 {
+        let can_borrow: f32 = match self.connections.get(&uid) {
+            Some(lenders) => lenders
+                .iter().map(|idx| self.nodes[*idx].memory.current)
+                .sum(),
+            None => 0.
+        };
+        can_borrow + own_memory
+    }
+
+    pub fn get_max_cores_memory(&self) -> (f32, f32) {
+        let mut uid_max_cores = *self.sorted_cores.last().unwrap();
+        let max_cores = self.nodes[uid_max_cores].cores.current;
+        let mut max_memory: f32 = 0.0;
+        let idx_min_cores = self.idx_nodes_with_more_cores(0.0);
+
+        for uid in &self.sorted_cores[
+            idx_min_cores..self.sorted_cores.len()] {
+            let uid = *uid;
+            let memory = self.nodes[uid].memory.current;
+            let other_memory = self.avl_memory_to_node_uid(uid, memory);
+            max_memory = max_memory.max(other_memory);
+        }
+
+        (max_cores, max_memory)
     }
 }

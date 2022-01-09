@@ -16,6 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::SystemTime;
@@ -291,9 +292,23 @@ impl Scheduler
                 skip = orig_queueing;
             }
 
+            let (t_max_cores, t_max_mem) = self.registry.get_max_cores_memory();
+            let mut max_cores = t_max_cores;
+            let mut max_memory = t_max_mem;
+
+            // println!("Cores: {}, Memory: {}", max_cores, max_memory);
+
             for (i, job) in self.jobs_queuing.iter_mut().skip(skip).enumerate() {
+                if job.cores > max_cores || job.memory > max_memory {
+                    continue;
+                }
+
                 if Self::job_allocate(&mut self.registry, job) {
                     run_now.push(i + skip);
+                    let (t_max_cores, t_max_mem) = self.registry.get_max_cores_memory();
+
+                    max_cores = t_max_cores;
+                    max_memory = t_max_mem;
                 }
             }
 

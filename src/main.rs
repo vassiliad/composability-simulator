@@ -85,6 +85,8 @@ fn main() -> Result<(), String> {
             println!("{:#?}) At tick {}, finished: {} - running: {} - queueing: {}",
                      delta, sched.now, last_report, sched.jobs_running.len(),
                      sched.jobs_queuing.len());
+            let (cores, memory) = sched.registry.get_max_cores_memory();
+            println!("  Max cores: {}, Max memory: {}", cores, memory);
         }
     }
     let delta = SystemTime::now().duration_since(start).unwrap();
