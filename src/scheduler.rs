@@ -62,29 +62,15 @@ impl Scheduler
         self.job_factory.job_mark_done(&job);
 
         let uid_cores = job.node_cores.unwrap();
-
-        let all_uids_cores = vec![uid_cores];
-        // VV: after finding the index of the node in the sorted_cores array
-        // it's now safe to free cores
         self.registry.nodes[uid_cores].free_cores(job.cores);
 
-        let all_uids_memory: Vec<usize> = job
-            .node_memory
-            .iter()
-            .map(|&(uid_memory, memory)| {
-                let node = &mut self.registry.nodes[uid_memory];
-                // println!(
-                //     "Freeing {} memory from {} with max memory {}",
-                //     memory, node.name, node.memory.capacity
-                // );
-                node.free_memory(memory);
+        for (uid_memory, memory) in &job.node_memory {
+            let mut node = &mut self.registry.nodes[*uid_memory];
+            node.free_memory(*memory);
+        }
 
-                uid_memory
-            })
-            .collect();
-
-        self.registry.resort_nodes_cores(&all_uids_cores);
-        self.registry.resort_nodes_memory(&all_uids_memory);
+        self.registry.resort_nodes_cores();
+        self.registry.resort_nodes_memory();
     }
 
     fn job_allocate_on_single_node(registry: &mut NodeRegistry, idx_cores: usize, job: &mut Job) {
@@ -102,8 +88,8 @@ impl Scheduler
         // VV: and then re-sort the sorted_cores and sorted_memory indices of
         // the registry. This ensures that the next allocation will find
         // the nodes in proper order.
-        registry.resort_nodes_cores(&vec![uid_node]);
-        registry.resort_nodes_memory(&vec![uid_node]);
+        registry.resort_nodes_cores();
+        registry.resort_nodes_memory();
     }
 
     fn job_allocate_on_many_nodes(
@@ -133,8 +119,6 @@ impl Scheduler
             return false;
         }
 
-        let mut uids_memory = vec![];
-
         let mut rem_mem = job.memory;
 
         registry.nodes[uid_cores].allocate_cores(job.cores);
@@ -145,7 +129,6 @@ impl Scheduler
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
             job.node_memory.push((uid_cores, alloc));
-            uids_memory.push(uid_cores);
 
             registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
@@ -157,7 +140,6 @@ impl Scheduler
                 let alloc = rem_mem.min(node_mem.memory.current);
                 job.node_memory.push((*uid_mem, alloc));
 
-                uids_memory.push(*uid_mem);
                 registry.nodes[*uid_mem].allocate_memory(alloc);
                 rem_mem -= alloc;
 
@@ -170,8 +152,8 @@ impl Scheduler
         // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
         // job.cores, job.memory, job.node_cores, job.node_memory);
 
-        registry.resort_nodes_cores(&vec![uid_cores]);
-        registry.resort_nodes_memory(&uids_memory);
+        registry.resort_nodes_cores();
+        registry.resort_nodes_memory();
 
         assert_eq!(rem_mem, 0.0);
 

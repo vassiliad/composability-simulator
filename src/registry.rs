@@ -189,34 +189,20 @@ impl NodeRegistry {
         new
     }
 
-    pub fn resort_nodes_cores(&mut self, nodes: &Vec<usize>) {
-        // VV: The idea here is to create a new `indices` array that contains
-        // the `sorted_cores` elements but those in the @nodes array
-        // then perform insertion sort in there
-        let mut new_cores: Vec<usize> = NodeRegistry::indices_without(&self.sorted_cores, nodes);
-        for idx in nodes {
-            let node = &self.nodes[*idx];
-            let cores_at_least = |n: &Node| -> bool { n.cores.current < node.cores.current };
-            let idx = self.index_bisect_right(&new_cores, cores_at_least, None, None);
-            new_cores.insert(idx, node.uid);
-        }
-        self.sorted_cores.clear();
-        self.sorted_cores.append(&mut new_cores);
+    pub fn resort_nodes_cores(&mut self) {
+        self.sorted_cores.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
+            self.nodes[*idx1].cores.current.partial_cmp(
+                &self.nodes[*idx2].cores.current)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
-    pub fn resort_nodes_memory(&mut self, nodes: &Vec<usize>) {
-        // VV: The idea here is to create a new `indices` array that contains
-        // the `sorted_memory` elements but those in the @nodes array
-        // then perform insertion sort in there
-        let mut new_memory: Vec<usize> = NodeRegistry::indices_without(&self.sorted_memory, nodes);
-        for idx in nodes {
-            let node = &self.nodes[*idx];
-            let memory_at_least = |n: &Node| -> bool { n.memory.current < node.memory.current };
-            let idx = self.index_bisect_right(&new_memory, memory_at_least, None, None);
-            new_memory.insert(idx, node.uid);
-        }
-        self.sorted_memory.clear();
-        self.sorted_memory.append(&mut new_memory);
+    pub fn resort_nodes_memory(&mut self) {
+        self.sorted_memory.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
+            self.nodes[*idx1].memory.current.partial_cmp(
+                &self.nodes[*idx2].memory.current)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     pub fn nodes_sorted_memory(&self, at_least: f32) -> impl Iterator<Item=&Node> {

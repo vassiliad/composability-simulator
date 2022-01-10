@@ -89,9 +89,8 @@ mod test_node {
         nodes[1].memory.current = 10.;
 
         let nodes = reg.nodes_immut();
-        let uids = vec![nodes[0].uid, nodes[1].uid];
-        reg.resort_nodes_cores(&uids);
-        reg.resort_nodes_memory(&uids);
+        reg.resort_nodes_cores();
+        reg.resort_nodes_memory();
 
         let cores: Vec<&node::Node> = reg.nodes_sorted_cores(-1.).collect();
         let memory: Vec<&node::Node> = reg.nodes_sorted_memory(0.).collect();
