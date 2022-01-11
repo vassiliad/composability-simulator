@@ -46,6 +46,7 @@ pub struct Job {
 }
 
 impl Job {
+    #[allow(dead_code)]
     pub fn new(
         cores: f32,
         memory: f32,
@@ -115,7 +116,7 @@ impl FromStr for Job {
     ///
     /// Just use '?' for the parser to pick the appropriate UID.
     fn from_str(line: &str) -> Result<Self, <Self as FromStr>::Err> {
-        let tokens: Vec<_> = line.split(";").map(|s| s.trim()).collect();
+        let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
 
         if tokens.len() != 6 {
             return Err(format!(

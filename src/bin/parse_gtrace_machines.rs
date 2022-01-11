@@ -58,8 +58,8 @@ impl FromStr for Node {
         */
         let toks = s.split(',').collect::<Vec<_>>();
         if toks.len() != 6 {
-            return Err(bail!("Expected a string with 6 comma separated tokens, \
-                        but got {:?} instead.", toks));
+            bail!("Expected a string with 6 comma separated tokens, \
+                        but got {:?} instead.", toks);
         }
 
         let uid: usize = toks[1].parse()
@@ -129,8 +129,8 @@ fn parse_arguments() -> Result<Arguments> {
     let args = app.get_matches();
     let input_file = args.value_of("input_file").unwrap();
     let output_file_prefix = args.value_of("outputFilePrefix").unwrap();
-    let input_file = PathBuf::from(input_file).to_owned();
-    let output_file_prefix = PathBuf::from(output_file_prefix).to_owned();
+    let input_file = PathBuf::from(input_file);
+    let output_file_prefix = PathBuf::from(output_file_prefix);
 
     let fraction_memory_local = args.value_of("fractionMemoryLocal").unwrap();
     let fraction_memory_local: f32 = fraction_memory_local.parse()
@@ -167,10 +167,10 @@ fn parse_unique_nodes(input_file: &Path) -> Result<Vec<Node>> {
         let line = line?;
         match line.parse::<Node>() {
             Ok(node) => {
-                if node_uids.contains(&node.uid) == false {
+                if !node_uids.contains(&node.uid) {
                     let pred = |n: &Node| -> bool { n.cores < node.cores };
                     let idx = nodes.partition_point(pred);
-                    node_uids.insert(node.uid.clone());
+                    node_uids.insert(node.uid);
 
                     nodes.insert(idx, node);
                 }
@@ -186,7 +186,7 @@ fn main() -> Result<()> {
     let arguments = parse_arguments()?;
 
     if let Some(parent) = arguments.output_file_prefix.parent() {
-        if parent.exists() == false {
+        if !parent.exists() {
             create_dir_all(parent)
                 .context(format!("Unable to create directory for output files {}",
                                  parent.display()))?;
@@ -218,28 +218,28 @@ fn main() -> Result<()> {
 
     loop {
         end = end.min(nodes.len());
-        let terminate = (end == nodes.len());
+        let terminate = end == nodes.len();
 
         let total_memory = nodes.iter().skip(start).take(end - start)
             .fold(0., |agg, node| agg + node.memory);
         let shared_memory = total_memory * arguments.fraction_memory_remote;
 
-        writeln!(&mut out_nodes, "# Rack: {}", rack_id);
-        writeln!(&mut out_connections, "# Rack: {}", rack_id);
+        writeln!(&mut out_nodes, "# Rack: {}", rack_id)?;
+        writeln!(&mut out_connections, "# Rack: {}", rack_id)?;
 
         let pool_name = format!("Pool_{}", rack_id);
-        writeln!(&mut out_nodes, "{};0;{}", pool_name, shared_memory);
+        writeln!(&mut out_nodes, "{};0;{}", pool_name, shared_memory)?;
 
         for (i, node) in nodes[start..end].iter().enumerate() {
             let memory = node.memory * arguments.fraction_memory_local;
             let name = format!("Worker_{}_{}", rack_id, i);
 
-            writeln!(&mut out_nodes, "{};{};{}", name, node.cores, memory);
-            writeln!(&mut out_connections, "{};{}", name, pool_name);
+            writeln!(&mut out_nodes, "{};{};{}", name, node.cores, memory)?;
+            writeln!(&mut out_connections, "{};{}", name, pool_name)?;
         }
 
-        writeln!(&mut out_nodes, "")?;
-        writeln!(&mut out_connections, "")?;
+        writeln!(&mut out_nodes)?;
+        writeln!(&mut out_connections)?;
 
         if terminate {
             break;

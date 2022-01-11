@@ -17,9 +17,9 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use crate::resource;
-
 use std::fmt::{Display, Formatter};
+
+use crate::resource;
 
 pub type NodeId = usize;
 
@@ -87,6 +87,7 @@ impl Node {
         })
     }
 
+    #[allow(dead_code)]
     pub fn can_host_job(&self, cores: f32, memory: f32) -> bool {
         self.cores.current >= cores && self.memory.current >= memory
     }

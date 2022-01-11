@@ -34,13 +34,11 @@ fn main() -> Result<(), String> {
     let arguments: Vec<_> = args().collect();
 
     if arguments.len() < 1 + 3 || arguments.len() > 1 + 3 + 1 {
-        return Err(format!(
-            "Expected arguments: \
+        return Err("Expected arguments: \
             <path to node definition> \
             <path to node connection definition> \
             <path to job definition> \
-            [<path to output file for output trace>]"
-        ));
+            [<path to output file for output trace>]".to_string());
     }
 
     let path_nodes = Path::new(&arguments[1]);
@@ -71,7 +69,7 @@ fn main() -> Result<(), String> {
     let report_every = 1000;
     let report_every_secs = 5.0;
     let mut last_report_time = SystemTime::now();
-    let start = last_report_time.clone();
+    let start = last_report_time;
 
     while sched.tick() {
         let now = SystemTime::now();

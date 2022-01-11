@@ -25,7 +25,6 @@ use std::io::BufWriter;
 use std::io::Cursor;
 use std::io::Write;
 use std::path::Path;
-use std::ptr::write;
 
 use crate::job::Job;
 use crate::job::reset_job_metadata;
@@ -70,7 +69,7 @@ impl JobFactory for JobCollection {
     }
 
     fn more_jobs(&self) -> bool {
-        self.jobs.len() > 0
+        !self.jobs.is_empty()
     }
 
     fn jobs_done(&self) -> &Vec<usize> {
@@ -79,6 +78,7 @@ impl JobFactory for JobCollection {
 }
 
 impl JobCollection {
+    #[allow(dead_code)]
     pub fn new(jobs: Vec<Job>) -> Self {
         let jobs = VecDeque::from(jobs);
         Self {
@@ -104,6 +104,7 @@ impl JobStreaming {
         Ok(Self::from_reader(reader))
     }
 
+    #[allow(dead_code)]
     pub fn from_string(content: String) -> Result<Self, String> {
         let reader = Box::new(Cursor::new(content));
         Ok(Self::from_reader(reader))
@@ -127,12 +128,12 @@ impl JobStreaming {
         loop {
             let read = self.reader.read_line(&mut line);
             match read {
-                Ok(0) => (break),
+                Ok(0) => break,
                 Ok(_) => {
                     // VV: Skip empty lines, and lines starting with a "#"
                     line = line.trim().to_owned();
 
-                    if line.starts_with("#") || line.len() == 0 {
+                    if line.starts_with('#') || line.is_empty() {
                         line.clear();
                         continue;
                     }
@@ -182,6 +183,7 @@ impl JobStreamingWithOutput {
         Self::from_reader_to_path(reader, output_path)
     }
 
+    #[allow(dead_code)]
     pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self, String> {
         let reader = Box::new(Cursor::new(content));
         Self::from_reader_to_path(reader, output_path)
@@ -190,14 +192,14 @@ impl JobStreamingWithOutput {
     pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self, String> {
         let inner = JobStreaming::from_reader(reader);
         let writer = JobStreamingWithOutput::make_writer(output_path)?;
-        Ok(Self {inner, writer})
+        Ok(Self { inner, writer })
     }
 }
 
 impl JobFactory for JobStreaming {
     fn job_peek(&self) -> Option<&Job> {
         match &self.next_job {
-            Some(x) => Some(&x),
+            Some(x) => Some(x),
             None => None,
         }
     }
@@ -236,14 +238,14 @@ impl JobFactory for JobStreamingWithOutput {
     fn job_mark_done(&mut self, job: &Job) {
         self.inner.jobs_done.push(job.uid);
         write!(self.writer, "{};{};{};{};{};{};{};{};{}",
-               job.uid, job.cores, job.memory, job.duration, if job.can_borrow {'y'} else {'n'},
+               job.uid, job.cores, job.memory, job.duration, if job.can_borrow { 'y' } else { 'n' },
                job.time_created, job.time_started.unwrap(), job.time_done.unwrap(),
                job.node_cores.unwrap()).unwrap();
 
         for (node, mem) in &job.node_memory {
             write!(self.writer, ";{};{}", node, mem).unwrap();
         }
-        writeln!(self.writer, "").unwrap();
+        writeln!(self.writer).unwrap();
         self.writer.flush().unwrap();
     }
 

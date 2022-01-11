@@ -36,7 +36,7 @@ impl Resource {
         //     ));
         // }
         Ok(Self {
-            capacity: capacity,
+            capacity,
             // lendable: lendable,
             current: capacity,
             num_allocate: 0,

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::path::{self, Path};
+use std::path::Path;
 
 use crate::node::Node;
 
@@ -33,17 +33,20 @@ pub struct NodeRegistry {
     pub sorted_cores: Vec<usize>,
     pub sorted_memory: Vec<usize>,
     pub connections: HashMap<usize, Vec<usize>>,
+    pub is_dirty: bool,
 }
 
 impl NodeRegistry {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        return Self {
+        Self {
             registry: HashMap::new(),
             nodes: vec![],
             sorted_cores: vec![],
             sorted_memory: vec![],
             connections: HashMap::new(),
-        };
+            is_dirty: false,
+        }
     }
 
     pub fn load_nodes(&mut self, path: &Path) -> Result<(), String> {
@@ -67,7 +70,7 @@ impl NodeRegistry {
             let line = x.unwrap();
             let line = line.trim();
 
-            if line.len() > 0 && line.starts_with("#") == false {
+            if !line.is_empty() && !line.starts_with('#') {
                 self.new_node_from_str(line)?;
             }
         }
@@ -96,7 +99,7 @@ impl NodeRegistry {
             let line = x.unwrap();
             let line = line.trim();
 
-            if line.len() > 0 && line.starts_with("#") == false {
+            if !line.is_empty() && !line.starts_with('#') {
                 self.new_connection_from_str(line)?;
             }
         }
@@ -113,13 +116,11 @@ impl NodeRegistry {
         Ok(reg)
     }
 
-    pub fn nodes_mut(&mut self) -> &mut Vec<Node> {
-        return &mut self.nodes;
-    }
+    #[allow(dead_code)]
+    pub fn nodes_mut(&mut self) -> &mut Vec<Node> { &mut self.nodes }
 
-    pub fn nodes_immut(&self) -> &Vec<Node> {
-        return &self.nodes;
-    }
+    #[allow(dead_code)]
+    pub fn nodes_immut(&self) -> &Vec<Node> { &self.nodes }
 
     fn register_node(&mut self, name: &str) -> Result<usize, String> {
         match self.registry.get(name) {
@@ -134,7 +135,7 @@ impl NodeRegistry {
 
     pub fn index_bisect_right<FCompareNodes>(
         &self,
-        indices: &Vec<usize>,
+        indices: &[usize],
         node_before: FCompareNodes,
         lo: Option<usize>,
         hi: Option<usize>,
@@ -142,8 +143,8 @@ impl NodeRegistry {
         where
             FCompareNodes: Fn(&Node) -> bool,
     {
-        let lo = lo.or(Some(0)).unwrap();
-        let hi = hi.or(Some(indices.len())).unwrap();
+        let lo = lo.unwrap_or(0);
+        let hi = hi.unwrap_or(indices.len());
         if lo != hi {
             let predicate = |idx: &usize| -> bool {
                 let node = &self.nodes[*idx];
@@ -167,6 +168,7 @@ impl NodeRegistry {
         self.sorted_memory.insert(idx, node.uid);
     }
 
+    #[allow(dead_code)]
     pub fn nodes_sorted_cores(&self, at_least: f32) -> impl Iterator<Item=&Node> {
         let cores_at_least = |n: &Node| -> bool { n.cores.current < at_least };
         let idx = self.index_bisect_right(&self.sorted_cores, cores_at_least, None, None);
@@ -175,18 +177,6 @@ impl NodeRegistry {
             .iter()
             .skip(idx)
             .map(|idx| &self.nodes[*idx])
-    }
-
-    fn indices_without(indices: &Vec<usize>, except: &Vec<usize>) -> Vec<usize> {
-        let mut new: Vec<usize> = Vec::with_capacity(except.len());
-
-        for idx in indices {
-            if except.contains(idx) == false {
-                new.push(*idx);
-            }
-        }
-
-        new
     }
 
     pub fn resort_nodes_cores(&mut self) {
@@ -205,6 +195,7 @@ impl NodeRegistry {
         });
     }
 
+    #[allow(dead_code)]
     pub fn nodes_sorted_memory(&self, at_least: f32) -> impl Iterator<Item=&Node> {
         let memory_at_least = |n: &Node| -> bool { n.memory.current < at_least };
         let idx = self.index_bisect_right(&self.sorted_memory, memory_at_least, None, None);
@@ -215,6 +206,7 @@ impl NodeRegistry {
             .map(|idx| &self.nodes[*idx])
     }
 
+    #[allow(dead_code)]
     pub fn idx_sorted_cores(&self, node: &Node) -> usize {
         let cores_target = node.cores.current;
         let uid = node.uid;
@@ -249,6 +241,7 @@ impl NodeRegistry {
         self.sorted_cores.partition_point(pred)
     }
 
+    #[allow(dead_code)]
     pub fn idx_sorted_memory(&self, node: &Node) -> usize {
         let memory_target = node.memory.current;
         let uid = node.uid;
@@ -270,7 +263,7 @@ impl NodeRegistry {
         // VV: format is <node_borrower:str>;[<lender1:str>;...<lender_n:str>]
         // lenders might also be "*" (<node_borrowser:str>;*)
         // in which case the borrower can borrow from *any* node
-        let tokens: Vec<_> = line.split(";").map(|x| x.trim()).collect();
+        let tokens: Vec<_> = line.split(';').map(|x| x.trim()).collect();
         let borrower;
 
         if let Some(&c) = self.registry.get(tokens[0]) {
@@ -282,7 +275,7 @@ impl NodeRegistry {
         let mut lenders: Vec<usize> = vec![];
 
         let mut process_lender = |i: usize, v: &str| -> Result<(), String> {
-            if v.len() == 0 {
+            if v.is_empty() {
                 return Ok(());
             }
             if let Some(&c) = self.registry.get(v) {
@@ -296,6 +289,7 @@ impl NodeRegistry {
             Ok(())
         };
 
+        #[allow(clippy::comparison_chain)]
         if tokens.len() == 2 {
             if tokens[1] == "*" {
                 for v in self.registry.values() {
@@ -340,7 +334,7 @@ impl NodeRegistry {
 
     pub fn new_node_from_str(&mut self, line: &str) -> Result<&Node, String> {
         // VV: format is <name>;<cores>;<memory>
-        let tokens: Vec<_> = line.split(";").map(|s| s.trim()).collect();
+        let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
 
         if tokens.len() != 3 {
             return Err(format!(
@@ -376,7 +370,7 @@ impl NodeRegistry {
         memory: f32,
         // memory_lendable: f32,
     ) -> Result<&Node, String> {
-        let uid = self.register_node(&name)?;
+        let uid = self.register_node(name)?;
 
         let node = Node::new(uid, name, cores, memory /*, memory_lendable*/)?;
 
@@ -398,7 +392,7 @@ impl NodeRegistry {
     }
 
     pub fn get_max_cores_memory(&self) -> (f32, f32) {
-        let mut uid_max_cores = *self.sorted_cores.last().unwrap();
+        let uid_max_cores = *self.sorted_cores.last().unwrap();
         let max_cores = self.nodes[uid_max_cores].cores.current;
         let mut max_memory: f32 = 0.0;
         let idx_min_cores = self.idx_nodes_with_more_cores(0.0);

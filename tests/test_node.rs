@@ -88,7 +88,6 @@ mod test_node {
         nodes[1].memory.capacity = 10.;
         nodes[1].memory.current = 10.;
 
-        let nodes = reg.nodes_immut();
         reg.resort_nodes_cores();
         reg.resort_nodes_memory();
 

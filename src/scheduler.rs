@@ -16,7 +16,6 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::SystemTime;
@@ -65,12 +64,11 @@ impl Scheduler
         self.registry.nodes[uid_cores].free_cores(job.cores);
 
         for (uid_memory, memory) in &job.node_memory {
-            let mut node = &mut self.registry.nodes[*uid_memory];
+            let node = &mut self.registry.nodes[*uid_memory];
             node.free_memory(*memory);
         }
-
-        self.registry.resort_nodes_cores();
-        self.registry.resort_nodes_memory();
+        // VV: It's not safe to use the sorted indices any more
+        self.registry.is_dirty = true;
     }
 
     fn job_allocate_on_single_node(registry: &mut NodeRegistry, idx_cores: usize, job: &mut Job) {
@@ -85,11 +83,8 @@ impl Scheduler
 
         job.node_cores = Some(node.uid);
         job.node_memory.push((node.uid, job.memory));
-        // VV: and then re-sort the sorted_cores and sorted_memory indices of
-        // the registry. This ensures that the next allocation will find
-        // the nodes in proper order.
-        registry.resort_nodes_cores();
-        registry.resort_nodes_memory();
+        // VV: It's not safe to use the sorted indices any more
+        registry.is_dirty = true;
     }
 
     fn job_allocate_on_many_nodes(
@@ -105,8 +100,7 @@ impl Scheduler
             .iter()
             .filter_map(|x| if lenders.contains(x) { Some(*x) } else { None })
             .collect();
-        // let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
-        // VV: Assumes that *all* node scan steal memory from *any* other node
+
         let total_memory: f32 = all_memory
             .iter()
             .map(|idx: &usize| registry.nodes[*idx].memory.current)
@@ -152,8 +146,8 @@ impl Scheduler
         // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
         // job.cores, job.memory, job.node_cores, job.node_memory);
 
-        registry.resort_nodes_cores();
-        registry.resort_nodes_memory();
+        // VV: It's not safe to use the sorted indices any more
+        registry.is_dirty = true;
 
         assert_eq!(rem_mem, 0.0);
 
@@ -161,6 +155,13 @@ impl Scheduler
     }
 
     fn job_allocate(registry: &mut NodeRegistry, job: &mut Job) -> bool {
+        if registry.is_dirty {
+            registry.resort_nodes_cores();
+            registry.resort_nodes_memory();
+            // VV: It's now safe to use the sorted indices
+            registry.is_dirty = false;
+        }
+
         let cores = registry.idx_nodes_with_more_cores(job.cores);
         if cores == registry.sorted_cores.len() {
             return false;
@@ -176,7 +177,7 @@ impl Scheduler
             let mut idx_cores = cores;
 
             for uid_cores in all_cores {
-                if let Some(_) = all_memory.iter().position(|uid: &usize| uid == uid_cores) {
+                if all_memory.iter().any(|uid: &usize| uid == uid_cores) {
                     Self::job_allocate_on_single_node(registry, idx_cores, job);
                     return true;
                 }
@@ -185,24 +186,24 @@ impl Scheduler
             }
         }
 
-        if job.can_borrow == false {
+        if !job.can_borrow {
             return false;
         }
 
         let idx_memory = registry.idx_nodes_with_more_memory(0.0);
 
         for idx_cores in cores..registry.sorted_cores.len() {
-            if Self::job_allocate_on_many_nodes(registry, idx_cores, idx_memory, job) == true {
+            if Self::job_allocate_on_many_nodes(registry, idx_cores, idx_memory, job) {
                 return true;
             }
         }
 
-        return false;
+        false
     }
 
     pub fn tick(&mut self) -> bool {
         let mut next_tick: Option<f32> = None;
-        let mut run_now: Vec<usize> = Vec::with_capacity(self.jobs_queuing.len().max(10).min(10));
+        let mut run_now: Vec<usize> = vec![];
         // println!("Now is {}", self.now);
 
         let max_secs = 5.0;
@@ -213,7 +214,7 @@ impl Scheduler
             let new_running;
             let mut new_done = 0;
 
-            while self.jobs_running.len() > 0 {
+            while !self.jobs_running.is_empty() {
                 let job = &self.jobs_running[0];
                 if job.time_done.unwrap() <= self.now {
                     let job = self.jobs_running.pop_front().unwrap();
@@ -230,7 +231,7 @@ impl Scheduler
                     // println!("  NextRunning {}", job.time_done.unwrap());
                     next_tick = match next_tick {
                         Some(x) => Some(x.min(job.time_done.unwrap())),
-                        None => job.time_done.clone(),
+                        None => job.time_done,
                     };
 
                     break;
@@ -238,7 +239,7 @@ impl Scheduler
             }
 
             let orig_queueing = self.jobs_queuing.len();
-            // VV: Only add up to 100 jobs per loop so that simulator 
+            // VV: Only add up to 100 jobs per loop so that simulator
             // has more chances to print out periodic reports
             let max_new_queuing = 100;
             loop {
@@ -252,7 +253,7 @@ impl Scheduler
                             // println!("  NextQueueing {}", job.time_created);
                             next_tick = match next_tick {
                                 Some(x) => Some(x.min(job.time_created)),
-                                None => Some(job.time_created.clone()),
+                                None => Some(job.time_created),
                             };
                             break;
                         }
@@ -291,6 +292,7 @@ impl Scheduler
 
                     max_cores = t_max_cores;
                     max_memory = t_max_mem;
+                    self.registry.is_dirty = true;
                 }
             }
 
@@ -300,7 +302,7 @@ impl Scheduler
                 let mut q: VecDeque<Job> =
                     VecDeque::with_capacity(self.jobs_queuing.len() - new_running);
                 let mut i = 0;
-                while self.jobs_queuing.len() > 0 {
+                while !self.jobs_queuing.is_empty() {
                     let mut job = self.jobs_queuing.pop_front().unwrap();
                     let done = self.now + job.duration;
                     job.time_started = Some(self.now);
@@ -334,10 +336,6 @@ impl Scheduler
 
         self.now = next_tick.unwrap_or(self.now);
 
-        if (self.jobs_queuing.len() + self.jobs_running.len() > 0) || self.job_factory.more_jobs() {
-            true
-        } else {
-            false
-        }
+        (self.jobs_queuing.len() + self.jobs_running.len() > 0) || self.job_factory.more_jobs()
     }
 }

@@ -112,7 +112,7 @@ impl FromStr for TaskEvent {
 fn find_files_in_directory<P: AsRef<Path>>(path_to_root: P) -> Result<Vec<String>> {
     let path_to_root = path_to_root.as_ref();
 
-    let mut entries = read_dir(path_to_root)
+    let entries = read_dir(path_to_root)
         .context(format!("Unable to list entries under {}", path_to_root.display()))?;
     let mut paths: Vec<_> = entries.filter_map(|entry| {
         let entry = entry.ok()?;
@@ -149,13 +149,13 @@ fn extract_tasks_from_traces<P: AsRef<Path>>(path_to_root: P, path_output: P) ->
         handler_stop.lock().unwrap().store(true, Ordering::SeqCst);
     }).expect("Unable to set handler for SIG INT");
 
-    let path_output = path_output.as_ref().clone();
+    let path_output = path_output.as_ref();
     let file = File::create(path_output)
         .context(format!("Unable to open {} for output", path_output.display()))?;
-    let mut writer = std::io::BufWriter::new(file);
+    let mut writer = BufWriter::new(file);
 
     writeln!(&mut writer, "#time_created:f32;time_started:f32;time_done:f32;cores:f32;memory:f32")?;
-    let mut drop_tasks_created_before: f32 = f32::MAX;
+    let mut drop_tasks_created_before: f32;
 
     for p in paths {
         println!("Processing {}", p);
@@ -188,14 +188,13 @@ fn extract_tasks_from_traces<P: AsRef<Path>>(path_to_root: P, path_output: P) ->
             println!("  It is safe to store the first {} tasks, earliest draft task is {}",
                      drop_before, drop_tasks_created_before);
 
-            for idx in 0..drop_before {
-                let t = &book[idx];
+            for t in book.iter().take(drop_before) {
                 writeln!(&mut writer, "{};{};{};{};{}",
                          t.time_created, t.time_started, t.time_done, t.cores, t.memory)?;
             }
 
             book.drain(0..drop_before);
-            writer.flush();
+            writer.flush()?;
         } else {
             println!("  Cannot store any tasks because earliest draft-task is {}",
                      drop_tasks_created_before);
@@ -203,7 +202,7 @@ fn extract_tasks_from_traces<P: AsRef<Path>>(path_to_root: P, path_output: P) ->
 
         println!("  ! Earliest pending {}, earliest running {}",
                  earliest_unsheduled, earliest_running);
-        if book.len() > 0 {
+        if !book.is_empty() {
             println!("Earliest task {:#?}", book[0]);
         }
 
@@ -337,7 +336,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
             }
 
             TaskEvent::Schedule => {
-                if draft.contains_key(&key) == false {
+                if !draft.contains_key(&key) {
                     // VV: Must have been the wind ...
                     continue
                 }
@@ -348,7 +347,7 @@ fn digest_task_events_into_book<P: AsRef<Path>>(
             }
 
             TaskEvent::Kill | TaskEvent::Evict | TaskEvent::Finish | TaskEvent::Fail => {
-                if draft.contains_key(&key) == false {
+                if !draft.contains_key(&key) {
                     // VV: Must have been the wind ...
                     continue;
                 }
