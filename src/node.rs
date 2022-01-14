@@ -92,6 +92,7 @@ impl Node {
         self.cores.current >= cores && self.memory.current >= memory
     }
 
+    #[allow(dead_code)]
     pub fn allocate_job(&mut self, cores: f32, memory: f32) {
         self.allocate_cores(cores);
         self.allocate_memory(memory);

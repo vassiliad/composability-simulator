@@ -23,6 +23,8 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
 
+use anyhow::Context;
+
 use crate::node::Node;
 
 pub type UIDFactory = HashMap<String, usize>;
@@ -30,9 +32,11 @@ pub type UIDFactory = HashMap<String, usize>;
 pub struct NodeRegistry {
     pub registry: UIDFactory,
     pub nodes: Vec<Node>,
+    pub memory_total: Vec<f32>,
     pub sorted_cores: Vec<usize>,
     pub sorted_memory: Vec<usize>,
     pub connections: HashMap<usize, Vec<usize>>,
+    pub connections_reverse: HashMap<usize, Vec<usize>>,
     pub is_dirty: bool,
 }
 
@@ -42,9 +46,11 @@ impl NodeRegistry {
         Self {
             registry: HashMap::new(),
             nodes: vec![],
+            memory_total: vec![],
             sorted_cores: vec![],
             sorted_memory: vec![],
             connections: HashMap::new(),
+            connections_reverse: HashMap::new(),
             is_dirty: false,
         }
     }
@@ -327,6 +333,13 @@ impl NodeRegistry {
             }
         }
 
+        let rev = &mut self.connections_reverse;
+        for uid_lender in &lenders {
+            let borrowers = &mut rev.get_mut(uid_lender)
+                .context("Unknown lender {uid_lender?} in connections_reverse")
+                .unwrap();
+            borrowers.push(uid_borrower)
+        }
         self.connections.insert(uid_borrower, lenders);
 
         Ok(())
@@ -376,8 +389,10 @@ impl NodeRegistry {
 
         self.insort_memory(&node);
         self.insort_cores(&node);
+        self.memory_total.push(node.memory.capacity);
         self.nodes.push(node);
-
+        self.connections.insert(uid, vec![]);
+        self.connections_reverse.insert(uid, vec![]);
         Ok(&self.nodes[uid])
     }
 

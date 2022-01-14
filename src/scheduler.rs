@@ -71,28 +71,12 @@ impl Scheduler
         self.registry.is_dirty = true;
     }
 
-    fn job_allocate_on_single_node(registry: &mut NodeRegistry, idx_cores: usize, job: &mut Job) {
-        let uid_node = registry.sorted_cores[idx_cores];
-
-        // VV: finally, actually allocate the job on the node
-        let node = &mut registry.nodes[uid_node];
-
-        // println!("Can fit {}x{} to {}", job.cores, job.memory, node);
-
-        node.allocate_job(job.cores, job.memory);
-
-        job.node_cores = Some(node.uid);
-        job.node_memory.push((node.uid, job.memory));
-        // VV: It's not safe to use the sorted indices any more
-        registry.is_dirty = true;
-    }
-
-    fn job_allocate_on_many_nodes(
-        registry: &mut NodeRegistry,
+    fn try_allocate_on_many_cores(
+        registry: &NodeRegistry,
         idx_cores: usize,
         idx_memory: usize,
-        job: &mut Job,
-    ) -> bool {
+        job: &Job,
+    ) -> Option<(usize, Vec<(usize, f32)>)> {
         let uid_cores = registry.sorted_cores[idx_cores];
         let lenders = registry.connections.get(&uid_cores).unwrap();
         let all_memory: Vec<usize> = registry.sorted_memory
@@ -101,30 +85,15 @@ impl Scheduler
             .filter_map(|x| if lenders.contains(x) { Some(*x) } else { None })
             .collect();
 
-        let total_memory: f32 = all_memory
-            .iter()
-            .map(|idx: &usize| registry.nodes[*idx].memory.current)
-            .sum::<f32>()
-            + registry.nodes[uid_cores].memory.current;
-
-        if total_memory < job.memory {
-            // println!("Not enough memory {} for {} on {} from {:?} -- {:?}",
-            //     total_memory, job.memory, uid_cores, lenders, registry.connections);
-            return false;
-        }
-
         let mut rem_mem = job.memory;
-
-        registry.nodes[uid_cores].allocate_cores(job.cores);
-
+        let mut mem_alloc: Vec<(usize, f32)> = Vec::new();
         let node_cores = &registry.nodes[uid_cores];
-        job.node_cores = Some(node_cores.uid);
 
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
-            job.node_memory.push((uid_cores, alloc));
+            mem_alloc.push((uid_cores, alloc));
 
-            registry.nodes[uid_cores].allocate_memory(alloc);
+            // registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
         }
 
@@ -132,9 +101,8 @@ impl Scheduler
             if uid_mem != &uid_cores {
                 let node_mem = &registry.nodes[*uid_mem];
                 let alloc = rem_mem.min(node_mem.memory.current);
-                job.node_memory.push((*uid_mem, alloc));
+                mem_alloc.push((*uid_mem, alloc));
 
-                registry.nodes[*uid_mem].allocate_memory(alloc);
                 rem_mem -= alloc;
 
                 if rem_mem == 0.0 {
@@ -143,15 +111,49 @@ impl Scheduler
             }
         }
 
-        // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
-        // job.cores, job.memory, job.node_cores, job.node_memory);
+        if rem_mem == 0.0 {
+            Some((uid_cores, mem_alloc))
+        } else {
+            None
+        }
+    }
 
-        // VV: It's not safe to use the sorted indices any more
-        registry.is_dirty = true;
+    fn job_try_allocate(
+        registry: &NodeRegistry,
+        job: &Job,
+        cores_start: usize,
+        cores_end: usize,
+    ) -> Option<(usize, Vec<(usize, f32)>)> {
+        let memory = registry.idx_nodes_with_more_memory(job.memory);
 
-        assert_eq!(rem_mem, 0.0);
+        if memory < registry.sorted_memory.len() {
+            let all_memory = &registry.sorted_memory[memory..registry.sorted_memory.len()];
 
-        true
+            let all_cores = &registry.sorted_cores[cores_start..cores_end];
+            // VV: There's a chance one of the nodes with enough cores (all_cores) has enough
+            // memory too (all_memory)
+            for &uid_cores in all_cores {
+                if all_memory.iter().any(|&uid| uid == uid_cores) {
+                    // Self::job_allocate_on_single_node(registry, idx_cores, job);
+                    return Some((uid_cores, vec![(uid_cores, job.memory)]));
+                }
+            }
+        }
+
+        if !job.can_borrow {
+            return None;
+        }
+
+        let idx_memory = registry.idx_nodes_with_more_memory(0.0);
+
+        for idx_cores in cores_start..cores_end {
+            let try_alloc = Self::try_allocate_on_many_cores(registry, idx_cores, idx_memory, job);
+            if try_alloc.is_some() {
+                return try_alloc;
+            }
+        }
+
+        None
     }
 
     fn job_allocate(registry: &mut NodeRegistry, job: &mut Job) -> bool {
@@ -166,39 +168,38 @@ impl Scheduler
         if cores == registry.sorted_cores.len() {
             return false;
         }
-        let memory = registry.idx_nodes_with_more_memory(job.memory);
 
-        if memory < registry.sorted_memory.len() {
-            let all_memory = &registry.sorted_memory[memory..registry.sorted_memory.len()];
-
-            let all_cores = &registry.sorted_cores[cores..registry.sorted_cores.len()];
-            // VV: There's a chance one of the nodes with enough cores (all_cores) has enough
-            // memory too (all_memory)
-            let mut idx_cores = cores;
-
-            for uid_cores in all_cores {
-                if all_memory.iter().any(|uid: &usize| uid == uid_cores) {
-                    Self::job_allocate_on_single_node(registry, idx_cores, job);
-                    return true;
-                }
-
-                idx_cores += 1;
-            }
-        }
-
-        if !job.can_borrow {
-            return false;
-        }
-
-        let idx_memory = registry.idx_nodes_with_more_memory(0.0);
+        let mut ret = None;
 
         for idx_cores in cores..registry.sorted_cores.len() {
-            if Self::job_allocate_on_many_nodes(registry, idx_cores, idx_memory, job) {
-                return true;
+            ret = Self::job_try_allocate(registry, job,
+                                         idx_cores, idx_cores + 1);
+            if ret.is_some() {
+                break;
             }
         }
 
-        false
+        match ret {
+            Some((uid_cores, mut all_memory)) => {
+                registry.nodes[uid_cores].allocate_cores(job.cores);
+
+                let node_cores = &registry.nodes[uid_cores];
+                job.node_cores = Some(node_cores.uid);
+
+                for (uid_mem, allocated) in &all_memory {
+                    let node_mem = &mut registry.nodes[*uid_mem];
+                    node_mem.allocate_memory(*allocated);
+                }
+                job.node_memory.append(&mut all_memory);
+                // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
+                // job.cores, job.memory, job.node_cores, job.node_memory);
+
+                // VV: It's not safe to use the sorted indices any more
+                registry.is_dirty = true;
+                true
+            }
+            None => false
+        }
     }
 
     pub fn tick(&mut self) -> bool {
