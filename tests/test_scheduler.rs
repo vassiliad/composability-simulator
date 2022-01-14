@@ -1,5 +1,5 @@
-use dismem::job::reset_job_metadata;
 use dismem::job::Job;
+use dismem::job::reset_job_metadata;
 use dismem::job_factory::JobCollection;
 use dismem::registry::NodeRegistry;
 use dismem::scheduler::Scheduler;
@@ -96,7 +96,7 @@ mod test_scheduler {
 
         while sched.tick() {}
 
-        assert!(sched.job_factory.jobs_done().len() == 4);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
         Ok(())
     }
@@ -119,7 +119,7 @@ mod test_scheduler {
 
         while sched.tick() {}
 
-        assert!(sched.job_factory.jobs_done().len() == 4);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 10.0);
         Ok(())
     }

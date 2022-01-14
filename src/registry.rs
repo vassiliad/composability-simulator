@@ -332,7 +332,6 @@ impl NodeRegistry {
                 return Err(format!("Borrower {} cannot borrow from itself", uid_lender));
             }
         }
-
         let rev = &mut self.connections_reverse;
         for uid_lender in &lenders {
             let borrowers = &mut rev.get_mut(uid_lender)
@@ -340,7 +339,14 @@ impl NodeRegistry {
                 .unwrap();
             borrowers.push(uid_borrower)
         }
+
         self.connections.insert(uid_borrower, lenders);
+
+        for &uid_mem in self.connections.get(&uid_borrower).unwrap() {
+            self.memory_total[uid_mem] = self.avl_memory_to_node_uid(uid_mem);
+        }
+
+        self.memory_total[uid_borrower] = self.avl_memory_to_node_uid(uid_borrower);
 
         Ok(())
     }
@@ -396,7 +402,9 @@ impl NodeRegistry {
         Ok(&self.nodes[uid])
     }
 
-    pub fn avl_memory_to_node_uid(&self, uid: usize, own_memory: f32) -> f32 {
+    pub fn avl_memory_to_node_uid(&self, uid: usize) -> f32 {
+        let own_memory = self.nodes[uid].memory.current;
+
         let can_borrow: f32 = match self.connections.get(&uid) {
             Some(lenders) => lenders
                 .iter().map(|idx| self.nodes[*idx].memory.current)
@@ -415,8 +423,7 @@ impl NodeRegistry {
         for uid in &self.sorted_cores[
             idx_min_cores..self.sorted_cores.len()] {
             let uid = *uid;
-            let memory = self.nodes[uid].memory.current;
-            let other_memory = self.avl_memory_to_node_uid(uid, memory);
+            let other_memory = self.avl_memory_to_node_uid(uid);
             max_memory = max_memory.max(other_memory);
         }
 

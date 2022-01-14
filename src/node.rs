@@ -23,6 +23,7 @@ use crate::resource;
 
 pub type NodeId = usize;
 
+#[derive(Debug)]
 pub struct Node {
     pub cores: resource::Resource,
     pub memory: resource::Resource,

@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
+#[derive(Debug)]
 pub struct Resource {
     pub capacity: f32,
     pub current: f32,

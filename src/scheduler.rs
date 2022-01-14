@@ -63,10 +63,22 @@ impl Scheduler
         let uid_cores = job.node_cores.unwrap();
         self.registry.nodes[uid_cores].free_cores(job.cores);
 
-        for (uid_memory, memory) in &job.node_memory {
-            let node = &mut self.registry.nodes[*uid_memory];
+        let mut recomp_mem: HashSet<usize> = HashSet::new();
+
+        for (uid_mem, memory) in &job.node_memory {
+            let node = &mut self.registry.nodes[*uid_mem];
             node.free_memory(*memory);
+
+            recomp_mem.insert(*uid_mem);
+            for x in self.registry.connections_reverse.get(uid_mem).unwrap() {
+                recomp_mem.insert(*x);
+            }
         }
+
+        for uid_mem in recomp_mem {
+            self.registry.memory_total[uid_mem] = self.registry.avl_memory_to_node_uid(uid_mem);
+        }
+
         // VV: It's not safe to use the sorted indices any more
         self.registry.is_dirty = true;
     }
@@ -78,6 +90,11 @@ impl Scheduler
         job: &Job,
     ) -> Option<(usize, Vec<(usize, f32)>)> {
         let uid_cores = registry.sorted_cores[idx_cores];
+
+        if *registry.memory_total.get(uid_cores).unwrap() < job.memory {
+            return None;
+        }
+
         let lenders = registry.connections.get(&uid_cores).unwrap();
         let all_memory: Vec<usize> = registry.sorted_memory
             [idx_memory..registry.sorted_memory.len()]
@@ -91,8 +108,9 @@ impl Scheduler
 
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
-            mem_alloc.push((uid_cores, alloc));
-
+            if alloc > 0. {
+                mem_alloc.push((uid_cores, alloc));
+            }
             // registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
         }
@@ -101,7 +119,10 @@ impl Scheduler
             if uid_mem != &uid_cores {
                 let node_mem = &registry.nodes[*uid_mem];
                 let alloc = rem_mem.min(node_mem.memory.current);
-                mem_alloc.push((*uid_mem, alloc));
+
+                if alloc > 0. {
+                    mem_alloc.push((*uid_mem, alloc));
+                }
 
                 rem_mem -= alloc;
 
@@ -186,9 +207,15 @@ impl Scheduler
                 let node_cores = &registry.nodes[uid_cores];
                 job.node_cores = Some(node_cores.uid);
 
+                let mut recomp_mem: HashSet<usize> = HashSet::new();
+
                 for (uid_mem, allocated) in &all_memory {
                     let node_mem = &mut registry.nodes[*uid_mem];
                     node_mem.allocate_memory(*allocated);
+                    recomp_mem.insert(*uid_mem);
+                    for x in registry.connections_reverse.get(uid_mem).unwrap() {
+                        recomp_mem.insert(*x);
+                    }
                 }
                 job.node_memory.append(&mut all_memory);
                 // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
@@ -196,6 +223,11 @@ impl Scheduler
 
                 // VV: It's not safe to use the sorted indices any more
                 registry.is_dirty = true;
+
+                for uid_mem in recomp_mem {
+                    registry.memory_total[uid_mem] = registry.avl_memory_to_node_uid(uid_mem)
+                }
+
                 true
             }
             None => false
@@ -290,10 +322,8 @@ impl Scheduler
                 if Self::job_allocate(&mut self.registry, job) {
                     run_now.push(i + skip);
                     let (t_max_cores, t_max_mem) = self.registry.get_max_cores_memory();
-
                     max_cores = t_max_cores;
                     max_memory = t_max_mem;
-                    self.registry.is_dirty = true;
                 }
             }
 
