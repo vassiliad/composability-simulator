@@ -71,20 +71,31 @@ fn main() -> Result<(), String> {
     let mut last_report_time = SystemTime::now();
     let start = last_report_time;
 
+    let mut throughput_last = 0;
+    let mut throughput_delta = 0;
+
     while sched.tick() {
         let now = SystemTime::now();
         let delta = now.duration_since(last_report_time).unwrap();
+        let throughput = sched.jobs_running.len() + sched.jobs_done.len();
+        throughput_delta += throughput - throughput_last + sched.jobs_queuing.len();
+        throughput_last = throughput;
 
-        if (delta.as_secs_f32() > report_every_secs) || (sched.jobs_done.len() >= report_every + last_report) {
+        if (delta.as_secs_f32() > report_every_secs) || (
+            sched.jobs_done.len() >= report_every + last_report) {
             last_report = sched.jobs_done.len();
             last_report_time = now;
 
-            let delta = now.duration_since(start).unwrap();
+            let since_beg = now.duration_since(start).unwrap();
             println!("{:#?}) At tick {}, finished: {} - running: {} - queueing: {}",
-                     delta, sched.now, last_report, sched.jobs_running.len(),
+                     since_beg, sched.now, last_report, sched.jobs_running.len(),
                      sched.jobs_queuing.len());
             let (cores, memory) = sched.registry.get_max_cores_memory();
             println!("  Max cores: {}, Max memory: {}", cores, memory);
+            println!("  Simulator throughput events: {}", throughput_delta);
+            println!("  Simulator throughput events/sec: {}",
+                     throughput_delta as f32 / (delta.as_secs_f32()));
+            throughput_delta = 0;
         }
     }
     let delta = SystemTime::now().duration_since(start).unwrap();

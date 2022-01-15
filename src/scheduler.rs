@@ -18,6 +18,8 @@ under the License.
 */
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::SystemTime;
 
 use crate::job::Job;
@@ -140,11 +142,14 @@ impl Scheduler
     }
 
     fn job_try_allocate(
-        registry: &NodeRegistry,
-        job: &Job,
+        registry: std::sync::Arc<RwLock<&mut NodeRegistry>>,
+        job: std::sync::Arc<RwLock<&mut Job>>,
         cores_start: usize,
         cores_end: usize,
     ) -> Option<(usize, Vec<(usize, f32)>)> {
+        let registry = registry.read().unwrap();
+        let job = job.read().unwrap();
+
         let memory = registry.idx_nodes_with_more_memory(job.memory);
 
         if memory < registry.sorted_memory.len() {
@@ -168,7 +173,9 @@ impl Scheduler
         let idx_memory = registry.idx_nodes_with_more_memory(0.0);
 
         for idx_cores in cores_start..cores_end {
-            let try_alloc = Self::try_allocate_on_many_cores(registry, idx_cores, idx_memory, job);
+            let try_alloc = Self::try_allocate_on_many_cores(
+                &registry, idx_cores, idx_memory,
+                &job);
             if try_alloc.is_some() {
                 return try_alloc;
             }
@@ -190,15 +197,58 @@ impl Scheduler
             return false;
         }
 
-        let mut ret = None;
 
-        for idx_cores in cores..registry.sorted_cores.len() {
-            ret = Self::job_try_allocate(registry, job,
-                                         idx_cores, idx_cores + 1);
-            if ret.is_some() {
-                break;
+        let total = registry.sorted_cores.len() - cores;
+
+        let partitions = num_cpus::get_physical();
+        let step = 1.max(total / partitions);
+        let max_uid = registry.sorted_cores.len();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let t_reg = Arc::new(RwLock::new(registry));
+        let t_job = Arc::new(RwLock::new(job));
+
+        let handle = crossbeam::scope(|scope| {
+            for start in (0..total).step_by(step) {
+                let start = start + cores;
+                let end = max_uid.min(start + step);
+                let sender = tx.clone();
+                let t_reg = t_reg.clone();
+                let t_job = t_job.clone();
+
+                scope.spawn(move |_| {
+                    // println!("Processing {} to {}", start, end);
+
+                    let ret = Self::job_try_allocate(
+                        t_reg,
+                        t_job,
+                        start, end);
+                    // println!("    DONE {} to {} -> {:?}", start, end, ret);
+                    sender.send(ret).unwrap();
+                });
+            }
+        });
+
+        drop(tx);
+
+        handle.unwrap();
+
+        let mut ret: Option<(usize, Vec<(usize, f32)>)> = None;
+
+        for t in rx {
+            match t {
+                Some((uid_cores, mem)) => {
+                    if ret.is_none() {
+                        ret = Some((uid_cores, mem));
+                    }
+                },
+                None => {}
             }
         }
+
+        let mut registry = t_reg.write().unwrap();
+        let mut job = t_job.write().unwrap();
 
         match ret {
             Some((uid_cores, mut all_memory)) => {
