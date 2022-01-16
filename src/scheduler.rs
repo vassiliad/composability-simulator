@@ -190,15 +190,8 @@ impl Scheduler
             return false;
         }
 
-        let mut ret = None;
-
-        for idx_cores in cores..registry.sorted_cores.len() {
-            ret = Self::job_try_allocate(registry, job,
-                                         idx_cores, idx_cores + 1);
-            if ret.is_some() {
-                break;
-            }
-        }
+        let ret = Self::job_try_allocate(registry, job,
+                                         cores, registry.sorted_cores.len());
 
         match ret {
             Some((uid_cores, mut all_memory)) => {
