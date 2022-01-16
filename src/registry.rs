@@ -23,7 +23,9 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
 
+use anyhow::bail;
 use anyhow::Context;
+use anyhow::Result;
 
 use crate::node::Node;
 
@@ -55,22 +57,18 @@ impl NodeRegistry {
         }
     }
 
-    pub fn load_nodes(&mut self, path: &Path) -> Result<(), String> {
+    pub fn load_nodes(&mut self, path: &Path) -> Result<()> {
         let file = File::open(path);
 
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open node_definitions file {} because of {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open node_definitions file {} because of {:?}", path.display(), x)
         }
 
         let br = BufReader::new(file.unwrap());
 
         for (i, x) in br.lines().enumerate() {
             if let Err(err) = x {
-                return Err(format!("Unable to read line {} because of {}", i, err));
+                bail!("Unable to read line {} because of {}", i, err)
             }
 
             let line = x.unwrap();
@@ -84,22 +82,18 @@ impl NodeRegistry {
         Ok(())
     }
 
-    pub fn load_connections(&mut self, path: &Path) -> Result<(), String> {
+    pub fn load_connections(&mut self, path: &Path) -> Result<()> {
         let file = File::open(path);
 
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open node_connections file {} because of {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open node_connections file {} because of {:?}", path.display(), x)
         }
 
         let br = BufReader::new(file.unwrap());
 
         for (i, x) in br.lines().enumerate() {
             if let Err(err) = x {
-                return Err(format!("Unable to read line {} because of {}", i, err));
+                bail!("Unable to read line {} because of {}", i, err)
             }
 
             let line = x.unwrap();
@@ -113,7 +107,7 @@ impl NodeRegistry {
         Ok(())
     }
 
-    pub fn from_paths(path_nodes: &Path, path_connections: &Path) -> Result<Self, String> {
+    pub fn from_paths(path_nodes: &Path, path_connections: &Path) -> Result<Self> {
         let mut reg = Self::new();
 
         reg.load_nodes(path_nodes)?;
@@ -128,9 +122,9 @@ impl NodeRegistry {
     #[allow(dead_code)]
     pub fn nodes_immut(&self) -> &Vec<Node> { &self.nodes }
 
-    fn register_node(&mut self, name: &str) -> Result<usize, String> {
+    fn register_node(&mut self, name: &str) -> Result<usize> {
         match self.registry.get(name) {
-            Some(uid) => Err(format!("node {} already exists with UID {}", name, uid)),
+            Some(uid) => bail!("node {} already exists with UID {}", name, uid),
             None => {
                 let uid = self.registry.len();
                 self.registry.insert(name.to_owned(), uid);
@@ -265,7 +259,7 @@ impl NodeRegistry {
         idx_memory
     }
 
-    pub fn new_connection_from_str(&mut self, line: &str) -> Result<(), String> {
+    pub fn new_connection_from_str(&mut self, line: &str) -> Result<()> {
         // VV: format is <node_borrower:str>;[<lender1:str>;...<lender_n:str>]
         // lenders might also be "*" (<node_borrowser:str>;*)
         // in which case the borrower can borrow from *any* node
@@ -275,22 +269,22 @@ impl NodeRegistry {
         if let Some(&c) = self.registry.get(tokens[0]) {
             borrower = c;
         } else {
-            return Err(format!("Unknown borrower name {}", tokens[0]));
+            bail!("Unknown borrower name {}", tokens[0])
         }
 
         let mut lenders: Vec<usize> = vec![];
 
-        let mut process_lender = |i: usize, v: &str| -> Result<(), String> {
+        let mut process_lender = |i: usize, v: &str| -> Result<()> {
             if v.is_empty() {
                 return Ok(());
             }
             if let Some(&c) = self.registry.get(v) {
                 if lenders.contains(&c) {
-                    return Err(format!("The {}th lender \"{}\" is repeated", i, v));
+                    bail!("The {}th lender \"{}\" is repeated", i, v)
                 }
                 lenders.push(c);
             } else {
-                return Err(format!("The {}th lender \"{}\" is unknown", i, v));
+                bail!("The {}th lender \"{}\" is unknown", i, v)
             }
             Ok(())
         };
@@ -319,19 +313,20 @@ impl NodeRegistry {
         &mut self,
         uid_borrower: usize,
         lenders: Vec<usize>,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         if uid_borrower >= self.nodes.len() {
-            return Err(format!("Borrower {} is an unknown UID", uid_borrower));
+            bail!("Borrower {} is an unknown UID", uid_borrower)
         }
 
         for uid_lender in &lenders {
             if uid_lender >= &self.nodes.len() {
-                return Err(format!("Lender {} is an unknown UID", uid_lender));
+                bail!("Lender {} is an unknown UID", uid_lender)
             }
             if &uid_borrower == uid_lender {
-                return Err(format!("Borrower {} cannot borrow from itself", uid_lender));
+                bail!("Borrower {} cannot borrow from itself", uid_lender)
             }
         }
+
         let rev = &mut self.connections_reverse;
         for uid_lender in &lenders {
             let borrowers = &mut rev.get_mut(uid_lender)
@@ -339,28 +334,18 @@ impl NodeRegistry {
                 .unwrap();
             borrowers.push(uid_borrower)
         }
-
         self.connections.insert(uid_borrower, lenders);
-
-        for &uid_mem in self.connections.get(&uid_borrower).unwrap() {
-            self.memory_total[uid_mem] = self.avl_memory_to_node_uid(uid_mem);
-        }
-
-        self.memory_total[uid_borrower] = self.avl_memory_to_node_uid(uid_borrower);
 
         Ok(())
     }
 
-    pub fn new_node_from_str(&mut self, line: &str) -> Result<&Node, String> {
+    pub fn new_node_from_str(&mut self, line: &str) -> Result<&Node> {
         // VV: format is <name>;<cores>;<memory>
         let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
 
         if tokens.len() != 3 {
-            return Err(format!(
-                "Expected that \"{}\" contained <name:str>;<cores:f32>;<memory:f32>, \
-                instead got {:?}",
-                line, tokens
-            ));
+            bail!("Expected that \"{}\" contained <name:str>;<cores:f32>;<memory:f32>, \
+                instead got {:?}", line, tokens)
         }
 
         let name = tokens[0];
@@ -370,13 +355,13 @@ impl NodeRegistry {
         if let Ok(c) = tokens[1].parse() {
             cores = c;
         } else {
-            return Err(format!("Unable to parse {} into cores:f32", tokens[1]));
+            bail!("Unable to parse {} into cores:f32", tokens[1]);
         }
 
         if let Ok(m) = tokens[2].parse() {
             memory = m;
         } else {
-            return Err(format!("Unable to parse {} into memory:f32", tokens[2]));
+            bail!("Unable to parse {} into memory:f32", tokens[2])
         }
 
         self.new_node(name, cores, memory)
@@ -388,7 +373,7 @@ impl NodeRegistry {
         cores: f32,
         memory: f32,
         // memory_lendable: f32,
-    ) -> Result<&Node, String> {
+    ) -> Result<&Node> {
         let uid = self.register_node(name)?;
 
         let node = Node::new(uid, name, cores, memory /*, memory_lendable*/)?;
@@ -402,9 +387,7 @@ impl NodeRegistry {
         Ok(&self.nodes[uid])
     }
 
-    pub fn avl_memory_to_node_uid(&self, uid: usize) -> f32 {
-        let own_memory = self.nodes[uid].memory.current;
-
+    pub fn avl_memory_to_node_uid(&self, uid: usize, own_memory: f32) -> f32 {
         let can_borrow: f32 = match self.connections.get(&uid) {
             Some(lenders) => lenders
                 .iter().map(|idx| self.nodes[*idx].memory.current)
@@ -423,7 +406,8 @@ impl NodeRegistry {
         for uid in &self.sorted_cores[
             idx_min_cores..self.sorted_cores.len()] {
             let uid = *uid;
-            let other_memory = self.avl_memory_to_node_uid(uid);
+            let memory = self.nodes[uid].memory.current;
+            let other_memory = self.avl_memory_to_node_uid(uid, memory);
             max_memory = max_memory.max(other_memory);
         }
 

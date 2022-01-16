@@ -19,6 +19,9 @@ under the License.
 
 use std::fmt::{Display, Formatter};
 
+use anyhow::bail;
+use anyhow::Result;
+
 use crate::resource;
 
 pub type NodeId = usize;
@@ -54,17 +57,14 @@ impl Node {
         cores: f32,
         memory: f32,
         // memory_lendable: f32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self> {
         let name = String::from(name);
         let cores = resource::Resource::new(cores /*, 0.*/);
 
         let cores = match cores {
             Ok(cores) => cores,
             Err(s) => {
-                return Err(format!(
-                    "cores definition of {} invalid because {}",
-                    name, s
-                ))
+                bail!("cores definition of {} invalid because {}", name, s)
             }
         };
         let memory = resource::Resource::new(memory /*, memory_lendable*/);
@@ -72,10 +72,7 @@ impl Node {
         let memory = match memory {
             Ok(memory) => memory,
             Err(s) => {
-                return Err(format!(
-                    "memory definition of {} invalid because {}",
-                    name, s
-                ))
+                bail!("memory definition of {} invalid because {}", name, s)
             }
         };
 

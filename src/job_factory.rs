@@ -26,6 +26,9 @@ use std::io::Cursor;
 use std::io::Write;
 use std::path::Path;
 
+use anyhow::bail;
+use anyhow::Result;
+
 use crate::job::Job;
 use crate::job::reset_job_metadata;
 
@@ -89,14 +92,10 @@ impl JobCollection {
 }
 
 impl JobStreaming {
-    pub fn from_path(path: &Path) -> Result<Self, String> {
+    pub fn from_path(path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open file \"{}\" because: {:?}", path.display(), x)
         }
 
         let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
@@ -105,7 +104,7 @@ impl JobStreaming {
     }
 
     #[allow(dead_code)]
-    pub fn from_string(content: String) -> Result<Self, String> {
+    pub fn from_string(content: String) -> Result<Self> {
         let reader = Box::new(Cursor::new(content));
         Ok(Self::from_reader(reader))
     }
@@ -148,34 +147,25 @@ impl JobStreaming {
 }
 
 impl JobStreamingWithOutput {
-    fn make_writer(path: &Path) -> Result<Box<dyn Write>, String> {
+    fn make_writer(path: &Path) -> Result<Box<dyn Write>> {
         let file = File::create(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to create file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to create file \"{}\" because: {:?}", path.display(), x)
         }
 
         let mut writer = Box::new(BufWriter::new(file.unwrap())) as Box<dyn Write>;
         if let Err(x) = writeln!(writer, "#uid:usize;cores:f32;memory:f32;duration:f32;\
             can_borrow:y/n;time_created:f32;time_started:f32;time_done:f32;uid_node_cores:usize;\
             [uid_node_memory:usize;memory_alloc:f32]+") {
-            return Err(format!("Unable to write header to path {} because of {:?}",
-                               path.display(), x));
+            bail!("Unable to write header to path {} because of {:?}", path.display(), x)
         }
         Ok(writer)
     }
 
-    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self, String> {
+    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open file \"{}\" because: {:?}", path.display(), x)
         }
 
         let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
@@ -184,12 +174,12 @@ impl JobStreamingWithOutput {
     }
 
     #[allow(dead_code)]
-    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self, String> {
+    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self> {
         let reader = Box::new(Cursor::new(content));
         Self::from_reader_to_path(reader, output_path)
     }
 
-    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self, String> {
+    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self> {
         let inner = JobStreaming::from_reader(reader);
         let writer = JobStreamingWithOutput::make_writer(output_path)?;
         Ok(Self { inner, writer })
@@ -237,15 +227,7 @@ impl JobFactory for JobStreamingWithOutput {
 
     fn job_mark_done(&mut self, job: &Job) {
         self.inner.jobs_done.push(job.uid);
-        write!(self.writer, "{};{};{};{};{};{};{};{};{}",
-               job.uid, job.cores, job.memory, job.duration, if job.can_borrow { 'y' } else { 'n' },
-               job.time_created, job.time_started.unwrap(), job.time_done.unwrap(),
-               job.node_cores.unwrap()).unwrap();
-
-        for (node, mem) in &job.node_memory {
-            write!(self.writer, ";{};{}", node, mem).unwrap();
-        }
-        writeln!(self.writer).unwrap();
+        writeln!(self.writer, "{}", job).unwrap();
         self.writer.flush().unwrap();
     }
 

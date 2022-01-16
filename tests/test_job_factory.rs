@@ -1,4 +1,6 @@
 // use dismem::job::reset_job_metadata;
+use anyhow::Result;
+
 use dismem::job_factory::JobStreaming;
 
 #[cfg(test)]
@@ -8,7 +10,7 @@ mod test_job_factory {
     use super::*;
 
     #[test]
-    fn job_factory_streaming() -> Result<(), String> {
+    fn job_factory_streaming() -> Result<()> {
         let content = "0;0.0;0.0;0.0;y;0.0\n\
         # this is a comment above an empty line\n\
         \n\

@@ -17,6 +17,8 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -105,6 +107,35 @@ impl Job {
             time_done: None,
             node_cores: None,
             node_memory: vec![],
+        }
+    }
+}
+
+impl Display for Job {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.time_done.is_some() {
+            write!(f, "{};{};{};{};{};{};{};{};{}",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created,
+                   self.time_started.unwrap(), self.time_done.unwrap(), self.node_cores.unwrap())?;
+
+            for (node, mem) in &self.node_memory {
+                write!(f, ";{};{}", node, mem)?;
+            }
+            std::fmt::Result::Ok(())
+        } else if self.time_started.is_some() {
+            write!(f, "{};{};{};{};{};{};{};null;{}",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created,
+                   self.time_started.unwrap(), self.node_cores.unwrap())?;
+            for (node, mem) in &self.node_memory {
+                write!(f, ";{};{}", node, mem)?;
+            }
+            std::fmt::Result::Ok(())
+        } else {
+            write!(f, "{};{};{};{};{};{};null;null;null",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created)
         }
     }
 }

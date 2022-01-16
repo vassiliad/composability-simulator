@@ -18,7 +18,6 @@ under the License.
 */
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::time::SystemTime;
 
 use crate::job::Job;
 use crate::job_factory::JobFactory;
@@ -48,6 +47,12 @@ impl Scheduler
         }
     }
 
+    pub fn has_unschedulable(&self) -> bool {
+        self.jobs_running.is_empty()
+            && !self.jobs_queuing.is_empty()
+            && !self.job_factory.more_jobs()
+    }
+
     fn job_free(&mut self, job: Job) {
         // println!(
         //     "Freeing {}x{} from cores {} and memory {:?}",
@@ -63,44 +68,22 @@ impl Scheduler
         let uid_cores = job.node_cores.unwrap();
         self.registry.nodes[uid_cores].free_cores(job.cores);
 
-        let mut recomp_mem: HashSet<usize> = HashSet::new();
-
-        for (uid_mem, memory) in &job.node_memory {
-            let node = &mut self.registry.nodes[*uid_mem];
+        for (uid_memory, memory) in &job.node_memory {
+            let node = &mut self.registry.nodes[*uid_memory];
             node.free_memory(*memory);
-
-            recomp_mem.insert(*uid_mem);
-            for x in self.registry.connections_reverse.get(uid_mem).unwrap() {
-                recomp_mem.insert(*x);
-            }
         }
-
-        for uid_mem in recomp_mem {
-            self.registry.memory_total[uid_mem] = self.registry.avl_memory_to_node_uid(uid_mem);
-        }
-
         // VV: It's not safe to use the sorted indices any more
         self.registry.is_dirty = true;
     }
 
-    fn try_allocate_on_many_cores(
+    fn try_allocate_on_many_nodes(
         registry: &NodeRegistry,
         idx_cores: usize,
-        idx_memory: usize,
         job: &Job,
     ) -> Option<(usize, Vec<(usize, f32)>)> {
         let uid_cores = registry.sorted_cores[idx_cores];
-
-        if *registry.memory_total.get(uid_cores).unwrap() < job.memory {
-            return None;
-        }
-
         let lenders = registry.connections.get(&uid_cores).unwrap();
-        let all_memory: Vec<usize> = registry.sorted_memory
-            [idx_memory..registry.sorted_memory.len()]
-            .iter()
-            .filter_map(|x| if lenders.contains(x) { Some(*x) } else { None })
-            .collect();
+
 
         let mut rem_mem = job.memory;
         let mut mem_alloc: Vec<(usize, f32)> = Vec::new();
@@ -108,21 +91,17 @@ impl Scheduler
 
         if node_cores.memory.current > 0.0 {
             let alloc = rem_mem.min(node_cores.memory.current);
-            if alloc > 0. {
-                mem_alloc.push((uid_cores, alloc));
-            }
+            mem_alloc.push((uid_cores, alloc));
+
             // registry.nodes[uid_cores].allocate_memory(alloc);
             rem_mem -= alloc;
         }
 
-        for uid_mem in &all_memory {
+        for uid_mem in lenders {
             if uid_mem != &uid_cores {
                 let node_mem = &registry.nodes[*uid_mem];
                 let alloc = rem_mem.min(node_mem.memory.current);
-
-                if alloc > 0. {
-                    mem_alloc.push((*uid_mem, alloc));
-                }
+                mem_alloc.push((*uid_mem, alloc));
 
                 rem_mem -= alloc;
 
@@ -142,35 +121,20 @@ impl Scheduler
     fn job_try_allocate(
         registry: &NodeRegistry,
         job: &Job,
+        idx_memory: usize,
         cores_start: usize,
         cores_end: usize,
     ) -> Option<(usize, Vec<(usize, f32)>)> {
-        let memory = registry.idx_nodes_with_more_memory(job.memory);
-
-        if memory < registry.sorted_memory.len() {
-            let all_memory = &registry.sorted_memory[memory..registry.sorted_memory.len()];
+        if idx_memory < registry.sorted_memory.len() {
+            let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
 
             let all_cores = &registry.sorted_cores[cores_start..cores_end];
             // VV: There's a chance one of the nodes with enough cores (all_cores) has enough
             // memory too (all_memory)
             for &uid_cores in all_cores {
-                if all_memory.iter().any(|&uid| uid == uid_cores) {
-                    // Self::job_allocate_on_single_node(registry, idx_cores, job);
+                if all_memory.iter().find(|&&uid| uid == uid_cores).is_some() {
                     return Some((uid_cores, vec![(uid_cores, job.memory)]));
                 }
-            }
-        }
-
-        if !job.can_borrow {
-            return None;
-        }
-
-        let idx_memory = registry.idx_nodes_with_more_memory(0.0);
-
-        for idx_cores in cores_start..cores_end {
-            let try_alloc = Self::try_allocate_on_many_cores(registry, idx_cores, idx_memory, job);
-            if try_alloc.is_some() {
-                return try_alloc;
             }
         }
 
@@ -185,13 +149,27 @@ impl Scheduler
             registry.is_dirty = false;
         }
 
-        let cores = registry.idx_nodes_with_more_cores(job.cores);
-        if cores == registry.sorted_cores.len() {
+        let cores_start = registry.idx_nodes_with_more_cores(job.cores);
+        if cores_start == registry.sorted_cores.len() {
             return false;
         }
 
-        let ret = Self::job_try_allocate(registry, job,
-                                         cores, registry.sorted_cores.len());
+        let idx_memory = registry.idx_nodes_with_more_memory(job.memory);
+
+        // VV: First ty to fit job on any single node
+        let mut ret = Self::job_try_allocate(registry, job, idx_memory,
+                                             cores_start, registry.sorted_cores.len());
+
+        // VV: If that's not possible, and the job can borrow resources, then try scheduling it
+        // using multiple nodes
+        if ret.is_none() && job.can_borrow {
+            for idx_cores in cores_start..registry.sorted_cores.len() {
+                ret = Self::try_allocate_on_many_nodes(registry, idx_cores, job);
+                if ret.is_some() {
+                    break
+                }
+            }
+        }
 
         match ret {
             Some((uid_cores, mut all_memory)) => {
@@ -200,15 +178,9 @@ impl Scheduler
                 let node_cores = &registry.nodes[uid_cores];
                 job.node_cores = Some(node_cores.uid);
 
-                let mut recomp_mem: HashSet<usize> = HashSet::new();
-
                 for (uid_mem, allocated) in &all_memory {
                     let node_mem = &mut registry.nodes[*uid_mem];
                     node_mem.allocate_memory(*allocated);
-                    recomp_mem.insert(*uid_mem);
-                    for x in registry.connections_reverse.get(uid_mem).unwrap() {
-                        recomp_mem.insert(*x);
-                    }
                 }
                 job.node_memory.append(&mut all_memory);
                 // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
@@ -216,11 +188,6 @@ impl Scheduler
 
                 // VV: It's not safe to use the sorted indices any more
                 registry.is_dirty = true;
-
-                for uid_mem in recomp_mem {
-                    registry.memory_total[uid_mem] = registry.avl_memory_to_node_uid(uid_mem)
-                }
-
                 true
             }
             None => false
@@ -231,9 +198,6 @@ impl Scheduler
         let mut next_tick: Option<f32> = None;
         let mut run_now: Vec<usize> = vec![];
         // println!("Now is {}", self.now);
-
-        let max_secs = 5.0;
-        let tick_started = SystemTime::now();
 
         loop {
             let mut new_queueing = 0;
@@ -265,29 +229,18 @@ impl Scheduler
             }
 
             let orig_queueing = self.jobs_queuing.len();
-            // VV: Only add up to 100 jobs per loop so that simulator
-            // has more chances to print out periodic reports
-            let max_new_queuing = 100;
-            loop {
-                match self.job_factory.job_peek() {
-                    Some(job) => {
-                        if job.time_created <= self.now {
-                            let job = self.job_factory.job_get();
-                            self.jobs_queuing.push_back(job);
-                            new_queueing += 1;
-                        } else {
-                            // println!("  NextQueueing {}", job.time_created);
-                            next_tick = match next_tick {
-                                Some(x) => Some(x.min(job.time_created)),
-                                None => Some(job.time_created),
-                            };
-                            break;
-                        }
-                    }
-                    None => break,
-                }
 
-                if new_queueing == max_new_queuing {
+            while let Some(job) = self.job_factory.job_peek() {
+                if job.time_created <= self.now {
+                    let job = self.job_factory.job_get();
+                    self.jobs_queuing.push_back(job);
+                    new_queueing += 1;
+                } else {
+                    // println!("  NextQueueing {}", job.time_created);
+                    next_tick = match next_tick {
+                        Some(x) => Some(x.min(job.time_created)),
+                        None => Some(job.time_created),
+                    };
                     break;
                 }
             }
@@ -317,6 +270,7 @@ impl Scheduler
                     let (t_max_cores, t_max_mem) = self.registry.get_max_cores_memory();
                     max_cores = t_max_cores;
                     max_memory = t_max_mem;
+                    self.registry.is_dirty = true;
                 }
             }
 
@@ -348,13 +302,6 @@ impl Scheduler
 
             if new_queueing + new_running + new_done == 0 {
                 break;
-            }
-
-            // VV: if this tick is taking longer than 5 secs to process then bail out
-            // whoever is running the simulator might wish to print something to the terminal
-            let going_for = SystemTime::now().duration_since(tick_started).unwrap();
-            if going_for.as_secs_f32() > max_secs {
-                return true;
             }
         }
 
