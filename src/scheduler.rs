@@ -284,10 +284,13 @@ impl Scheduler
                 while !self.jobs_queuing.is_empty() {
                     let mut job = self.jobs_queuing.pop_front().unwrap();
                     let done = self.now + job.duration;
-                    job.time_started = Some(self.now);
-                    job.time_done = Some(done);
                     if run_now.contains(&i) {
-                        let predicate = |job: &Job| -> bool { job.time_done.unwrap() < done };
+                        job.time_started = Some(self.now);
+                        job.time_done = Some(done);
+
+                        let predicate = |job: &Job| -> bool {
+                            job.time_done.unwrap() < done
+                        };
                         let idx = self.jobs_running.partition_point(predicate);
                         self.jobs_running.insert(idx, job);
                     } else {
