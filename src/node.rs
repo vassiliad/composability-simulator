@@ -17,12 +17,16 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use crate::resource;
-
 use std::fmt::{Display, Formatter};
+
+use anyhow::bail;
+use anyhow::Result;
+
+use crate::resource;
 
 pub type NodeId = usize;
 
+#[derive(Debug)]
 pub struct Node {
     pub cores: resource::Resource,
     pub memory: resource::Resource,
@@ -53,17 +57,14 @@ impl Node {
         cores: f32,
         memory: f32,
         // memory_lendable: f32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self> {
         let name = String::from(name);
         let cores = resource::Resource::new(cores /*, 0.*/);
 
         let cores = match cores {
             Ok(cores) => cores,
             Err(s) => {
-                return Err(format!(
-                    "cores definition of {} invalid because {}",
-                    name, s
-                ))
+                bail!("cores definition of {} invalid because {}", name, s)
             }
         };
         let memory = resource::Resource::new(memory /*, memory_lendable*/);
@@ -71,10 +72,7 @@ impl Node {
         let memory = match memory {
             Ok(memory) => memory,
             Err(s) => {
-                return Err(format!(
-                    "memory definition of {} invalid because {}",
-                    name, s
-                ))
+                bail!("memory definition of {} invalid because {}", name, s)
             }
         };
 
@@ -87,10 +85,12 @@ impl Node {
         })
     }
 
+    #[allow(dead_code)]
     pub fn can_host_job(&self, cores: f32, memory: f32) -> bool {
         self.cores.current >= cores && self.memory.current >= memory
     }
 
+    #[allow(dead_code)]
     pub fn allocate_job(&mut self, cores: f32, memory: f32) {
         self.allocate_cores(cores);
         self.allocate_memory(memory);

@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
+#[derive(Debug)]
 pub struct Resource {
     pub capacity: f32,
     pub current: f32,
@@ -36,7 +37,7 @@ impl Resource {
         //     ));
         // }
         Ok(Self {
-            capacity: capacity,
+            capacity,
             // lendable: lendable,
             current: capacity,
             num_allocate: 0,

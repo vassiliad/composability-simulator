@@ -25,7 +25,9 @@ use std::io::BufWriter;
 use std::io::Cursor;
 use std::io::Write;
 use std::path::Path;
-use std::ptr::write;
+
+use anyhow::bail;
+use anyhow::Result;
 
 use crate::job::Job;
 use crate::job::reset_job_metadata;
@@ -70,7 +72,7 @@ impl JobFactory for JobCollection {
     }
 
     fn more_jobs(&self) -> bool {
-        self.jobs.len() > 0
+        !self.jobs.is_empty()
     }
 
     fn jobs_done(&self) -> &Vec<usize> {
@@ -79,6 +81,7 @@ impl JobFactory for JobCollection {
 }
 
 impl JobCollection {
+    #[allow(dead_code)]
     pub fn new(jobs: Vec<Job>) -> Self {
         let jobs = VecDeque::from(jobs);
         Self {
@@ -89,14 +92,10 @@ impl JobCollection {
 }
 
 impl JobStreaming {
-    pub fn from_path(path: &Path) -> Result<Self, String> {
+    pub fn from_path(path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open file \"{}\" because: {:?}", path.display(), x)
         }
 
         let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
@@ -104,7 +103,8 @@ impl JobStreaming {
         Ok(Self::from_reader(reader))
     }
 
-    pub fn from_string(content: String) -> Result<Self, String> {
+    #[allow(dead_code)]
+    pub fn from_string(content: String) -> Result<Self> {
         let reader = Box::new(Cursor::new(content));
         Ok(Self::from_reader(reader))
     }
@@ -127,12 +127,12 @@ impl JobStreaming {
         loop {
             let read = self.reader.read_line(&mut line);
             match read {
-                Ok(0) => (break),
+                Ok(0) => break,
                 Ok(_) => {
                     // VV: Skip empty lines, and lines starting with a "#"
                     line = line.trim().to_owned();
 
-                    if line.starts_with("#") || line.len() == 0 {
+                    if line.starts_with('#') || line.is_empty() {
                         line.clear();
                         continue;
                     }
@@ -147,34 +147,25 @@ impl JobStreaming {
 }
 
 impl JobStreamingWithOutput {
-    fn make_writer(path: &Path) -> Result<Box<dyn Write>, String> {
+    fn make_writer(path: &Path) -> Result<Box<dyn Write>> {
         let file = File::create(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to create file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to create file \"{}\" because: {:?}", path.display(), x)
         }
 
         let mut writer = Box::new(BufWriter::new(file.unwrap())) as Box<dyn Write>;
         if let Err(x) = writeln!(writer, "#uid:usize;cores:f32;memory:f32;duration:f32;\
             can_borrow:y/n;time_created:f32;time_started:f32;time_done:f32;uid_node_cores:usize;\
             [uid_node_memory:usize;memory_alloc:f32]+") {
-            return Err(format!("Unable to write header to path {} because of {:?}",
-                               path.display(), x));
+            bail!("Unable to write header to path {} because of {:?}", path.display(), x)
         }
         Ok(writer)
     }
 
-    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self, String> {
+    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
-            return Err(format!(
-                "Unable to open file \"{}\" because: {:?}",
-                path.display(),
-                x
-            ));
+            bail!("Unable to open file \"{}\" because: {:?}", path.display(), x)
         }
 
         let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
@@ -182,22 +173,23 @@ impl JobStreamingWithOutput {
         Self::from_reader_to_path(reader, output_path)
     }
 
-    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self, String> {
+    #[allow(dead_code)]
+    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self> {
         let reader = Box::new(Cursor::new(content));
         Self::from_reader_to_path(reader, output_path)
     }
 
-    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self, String> {
+    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self> {
         let inner = JobStreaming::from_reader(reader);
         let writer = JobStreamingWithOutput::make_writer(output_path)?;
-        Ok(Self {inner, writer})
+        Ok(Self { inner, writer })
     }
 }
 
 impl JobFactory for JobStreaming {
     fn job_peek(&self) -> Option<&Job> {
         match &self.next_job {
-            Some(x) => Some(&x),
+            Some(x) => Some(x),
             None => None,
         }
     }
@@ -235,15 +227,8 @@ impl JobFactory for JobStreamingWithOutput {
 
     fn job_mark_done(&mut self, job: &Job) {
         self.inner.jobs_done.push(job.uid);
-        write!(self.writer, "{};{};{};{};{};{};{};{};{}",
-               job.uid, job.cores, job.memory, job.duration, if job.can_borrow {'y'} else {'n'},
-               job.time_created, job.time_started.unwrap(), job.time_done.unwrap(),
-               job.node_cores.unwrap()).unwrap();
-
-        for (node, mem) in &job.node_memory {
-            write!(self.writer, ";{};{}", node, mem).unwrap();
-        }
-        writeln!(self.writer, "").unwrap();
+        writeln!(self.writer, "{}", job).unwrap();
+        self.writer.flush().unwrap();
     }
 
     fn more_jobs(&self) -> bool {

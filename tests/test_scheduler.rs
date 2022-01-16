@@ -1,5 +1,7 @@
-use dismem::job::reset_job_metadata;
+use anyhow::Result;
+
 use dismem::job::Job;
+use dismem::job::reset_job_metadata;
 use dismem::job_factory::JobCollection;
 use dismem::registry::NodeRegistry;
 use dismem::scheduler::Scheduler;
@@ -12,7 +14,7 @@ mod test_scheduler {
         nodes: usize,
         cores: f32,
         memory: f32,
-    ) -> Result<NodeRegistry, String> {
+    ) -> Result<NodeRegistry> {
         let mut reg = NodeRegistry::new();
 
         for i in 0..nodes {
@@ -43,7 +45,7 @@ mod test_scheduler {
     }
 
     #[test]
-    fn scheduler_vanilla_small() -> Result<(), String> {
+    fn scheduler_vanilla_small() -> Result<()> {
         let reg = registry_init_homogeneous(2, 1., 1.)?;
         let job_created: Vec<_> = vec![0.0, 1., 2., 3.];
 
@@ -53,19 +55,20 @@ mod test_scheduler {
 
         while sched.tick() {}
 
-        assert!(sched.job_factory.jobs_done().len() == 4);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
         Ok(())
     }
 
     #[test]
-    fn schedule_vanilla_large() -> Result<(), String> {
+    fn schedule_vanilla_large() -> Result<()> {
         let reg = registry_init_homogeneous(100, 1., 1.)?;
         let num_jobs = 100;
 
         let job_created: Vec<_> = vec![0.0; num_jobs];
 
-        let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, false);
+        let job_factory = jobfactory_init_homogeneous(
+            &job_created, 1.0, 1.0, 5.0, false);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
 
@@ -79,7 +82,36 @@ mod test_scheduler {
     }
 
     #[test]
-    fn scheduler_dismem_small() -> Result<(), String> {
+    fn unschedulable_vanilla() -> Result<()> {
+        let reg = registry_init_homogeneous(100, 1., 1.)?;
+        let num_jobs = 100;
+
+        reset_job_metadata();
+
+        let mut jobs: Vec<_> = (0..num_jobs)
+            .map(|uid| Job::new_with_uid(uid, 1.0, 1.0, 5.0,
+                                         false, 0.0))
+            .collect();
+
+        jobs.push(Job::new_with_uid(101, 100.0, 100.0, 5.0,
+                                    false, 0.0));
+
+        let job_factory = JobCollection::new(jobs);
+
+        let mut sched = Scheduler::new(reg, Box::new(job_factory));
+
+        while sched.tick() && !sched.has_unschedulable() {}
+
+        assert_eq!(sched.job_factory.jobs_done().len(), num_jobs);
+
+        assert_eq!(sched.now, 5.0);
+        assert_eq!(sched.jobs_queuing.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn scheduler_dismem_small() -> Result<()> {
         let mut reg = NodeRegistry::new();
         reg.new_node("CPU", 4.0, 0.0)?;
         reg.new_node("RAM", 0.0, 2.0)?;
@@ -96,13 +128,13 @@ mod test_scheduler {
 
         while sched.tick() {}
 
-        assert!(sched.job_factory.jobs_done().len() == 4);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
         Ok(())
     }
 
     #[test]
-    fn scheduler_dismem_small_with_2_lenders() -> Result<(), String> {
+    fn scheduler_dismem_small_with_2_lenders() -> Result<()> {
         let mut reg = NodeRegistry::new();
         reg.new_node("CPU", 3.0, 0.0)?;
         reg.new_node("RAM", 0.0, 2.0)?;
@@ -119,7 +151,7 @@ mod test_scheduler {
 
         while sched.tick() {}
 
-        assert!(sched.job_factory.jobs_done().len() == 4);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 10.0);
         Ok(())
     }

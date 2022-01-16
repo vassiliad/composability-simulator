@@ -1,12 +1,16 @@
+use anyhow::Result;
+
 use dismem::node;
 use dismem::registry;
 
 #[cfg(test)]
 mod test_node {
+    use anyhow::bail;
+
     use super::*;
 
     #[test]
-    fn init_node() -> Result<(), String> {
+    fn init_node() -> Result<()> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("test", 1.0, 1. /*, 1.*/)?;
 
@@ -14,19 +18,19 @@ mod test_node {
     }
 
     #[test]
-    fn fail_init_node_name() -> Result<(), String> {
+    fn fail_init_node_name() -> Result<()> {
         let mut reg = registry::NodeRegistry::new();
         let _n0 = reg.new_node("test", 1.0, 1. /*, 1.*/)?;
         let n1 = reg.new_node("test", 1.0, 1. /*, 1.*/);
 
         match n1 {
             Err(_) => Ok(()),
-            Ok(_) => Err("Should not have created a second Node with the name test".to_owned()),
+            Ok(_) => bail!("Should not have created a second Node with the name test"),
         }
     }
 
     #[test]
-    fn insort_nodes() -> Result<(), String> {
+    fn insort_nodes() -> Result<()> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);
@@ -44,7 +48,7 @@ mod test_node {
     }
 
     #[test]
-    fn filter_nodes() -> Result<(), String> {
+    fn filter_nodes() -> Result<()> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);
@@ -62,7 +66,7 @@ mod test_node {
     }
 
     #[test]
-    fn resort_nodes() -> Result<(), String> {
+    fn resort_nodes() -> Result<()> {
         let mut reg = registry::NodeRegistry::new();
         let _ = reg.new_node("more_memory", 1., 2. /*, 1.*/)?;
         let _ = reg.new_node("more_cores", 2., 1. /*, 1.*/);
@@ -88,10 +92,8 @@ mod test_node {
         nodes[1].memory.capacity = 10.;
         nodes[1].memory.current = 10.;
 
-        let nodes = reg.nodes_immut();
-        let uids = vec![nodes[0].uid, nodes[1].uid];
-        reg.resort_nodes_cores(&uids);
-        reg.resort_nodes_memory(&uids);
+        reg.resort_nodes_cores();
+        reg.resort_nodes_memory();
 
         let cores: Vec<&node::Node> = reg.nodes_sorted_cores(-1.).collect();
         let memory: Vec<&node::Node> = reg.nodes_sorted_memory(0.).collect();

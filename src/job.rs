@@ -17,6 +17,8 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -31,6 +33,7 @@ pub fn reset_job_metadata() {
     NEXT_JOB_UID.store(0, Ordering::SeqCst);
 }
 
+#[derive(Debug)]
 pub struct Job {
     pub uid: usize,
     pub cores: f32,
@@ -46,6 +49,7 @@ pub struct Job {
 }
 
 impl Job {
+    #[allow(dead_code)]
     pub fn new(
         cores: f32,
         memory: f32,
@@ -107,6 +111,35 @@ impl Job {
     }
 }
 
+impl Display for Job {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.time_done.is_some() {
+            write!(f, "{};{};{};{};{};{};{};{};{}",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created,
+                   self.time_started.unwrap(), self.time_done.unwrap(), self.node_cores.unwrap())?;
+
+            for (node, mem) in &self.node_memory {
+                write!(f, ";{};{}", node, mem)?;
+            }
+            std::fmt::Result::Ok(())
+        } else if self.time_started.is_some() {
+            write!(f, "{};{};{};{};{};{};{};null;{}",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created,
+                   self.time_started.unwrap(), self.node_cores.unwrap())?;
+            for (node, mem) in &self.node_memory {
+                write!(f, ";{};{}", node, mem)?;
+            }
+            std::fmt::Result::Ok(())
+        } else {
+            write!(f, "{};{};{};{};{};{};null;null;null",
+                   self.uid, self.cores, self.memory, self.duration,
+                   if self.can_borrow { 'y' } else { 'n' }, self.time_created)
+        }
+    }
+}
+
 impl FromStr for Job {
     type Err = String;
     /// Format is <uid:usize or '?' to use next available UID>;<cores:f32>;<memory:f32>;<duration:f32>;<borrow:y/n>;<time_created:f32>
@@ -115,7 +148,7 @@ impl FromStr for Job {
     ///
     /// Just use '?' for the parser to pick the appropriate UID.
     fn from_str(line: &str) -> Result<Self, <Self as FromStr>::Err> {
-        let tokens: Vec<_> = line.split(";").map(|s| s.trim()).collect();
+        let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
 
         if tokens.len() != 6 {
             return Err(format!(
