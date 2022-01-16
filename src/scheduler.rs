@@ -126,13 +126,14 @@ impl Scheduler
         cores_end: usize,
     ) -> Option<(usize, Vec<(usize, f32)>)> {
         if idx_memory < registry.sorted_memory.len() {
-            let all_memory = &registry.sorted_memory[idx_memory..registry.sorted_memory.len()];
-
-            let all_cores = &registry.sorted_cores[cores_start..cores_end];
             // VV: There's a chance one of the nodes with enough cores (all_cores) has enough
             // memory too (all_memory)
+
+            let all_cores = &registry.sorted_cores[cores_start..cores_end];
+
             for &uid_cores in all_cores {
-                if all_memory.iter().find(|&&uid| uid == uid_cores).is_some() {
+                let node = &registry.nodes[uid_cores];
+                if node.memory.current >= job.memory {
                     return Some((uid_cores, vec![(uid_cores, job.memory)]));
                 }
             }
