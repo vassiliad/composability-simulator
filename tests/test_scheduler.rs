@@ -8,6 +8,8 @@ use dismem::scheduler::Scheduler;
 
 #[cfg(test)]
 mod test_scheduler {
+    use dismem::registry::ParetoPoint;
+
     use super::*;
 
     fn registry_init_homogeneous(
@@ -153,6 +155,49 @@ mod test_scheduler {
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 10.0);
+        Ok(())
+    }
+
+    #[test]
+    fn registry_pareto() -> Result<()> {
+        let mut reg = NodeRegistry::new();
+        reg.new_node("CPU1", 3.0, 0.1)?;
+        reg.new_node("RAM", 0.0, 2.0)?;
+        reg.new_node("RAM more", 0.0, 2.0)?;
+        reg.new_node("CPU2", 4.0, 0.1)?;
+
+        let pareto = reg.pareto(true);
+
+        for ParetoPoint(uid, _cores, _memory) in &pareto {
+            println!("Node: {:#?}", reg.nodes[*uid])
+        }
+
+        let uids: Vec<_> = pareto.iter().map(|p| { p.0 }).collect();
+        assert_eq!(uids, [3]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn registry_pareto_equal() -> Result<()> {
+        let mut reg = NodeRegistry::new();
+        reg.new_node("CPU_FEW_CORES", 4.0, 0.1)?;
+        reg.new_node("RAM", 0.0, 2.0)?;
+        reg.new_node("RAM more", 0.0, 2.0)?;
+        reg.new_node("CPU_FEW_CORES_AGAIN", 4.0, 0.1)?;
+
+        reg.new_connection_from_str("CPU_FEW_CORES;*")?;
+        reg.new_connection_from_str("CPU_FEW_CORES_AGAIN;*")?;
+        reg.new_connection_from_str("RAM;")?;
+
+        let pareto = reg.pareto(true);
+
+        for ParetoPoint(uid, _cores, _memory) in &pareto {
+            println!("Node: {:#?}", reg.nodes[*uid])
+        }
+        let uids: Vec<_> = pareto.iter().map(|p| { p.0 }).collect();
+        assert_eq!(uids, [0]);
+
         Ok(())
     }
 }

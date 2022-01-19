@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -29,17 +29,22 @@ use anyhow::Result;
 
 use crate::node::Node;
 
+// use rayon::prelude::*;
+
 pub type UIDFactory = HashMap<String, usize>;
+
+// VV: UID, cores, memory
+#[derive(Debug)]
+pub struct ParetoPoint(pub usize, pub f32, pub f32);
 
 pub struct NodeRegistry {
     pub registry: UIDFactory,
     pub nodes: Vec<Node>,
-    pub memory_total: Vec<f32>,
-    pub sorted_cores: Vec<usize>,
-    pub sorted_memory: Vec<usize>,
+    pub memory_composable: Vec<f32>,
+    pub sorted_vanilla: Vec<usize>,
+    pub sorted_composable: Vec<usize>,
     pub connections: HashMap<usize, Vec<usize>>,
     pub connections_reverse: HashMap<usize, Vec<usize>>,
-    pub is_dirty: bool,
 }
 
 impl NodeRegistry {
@@ -48,12 +53,11 @@ impl NodeRegistry {
         Self {
             registry: HashMap::new(),
             nodes: vec![],
-            memory_total: vec![],
-            sorted_cores: vec![],
-            sorted_memory: vec![],
+            memory_composable: vec![],
+            sorted_vanilla: vec![],
+            sorted_composable: vec![],
             connections: HashMap::new(),
             connections_reverse: HashMap::new(),
-            is_dirty: false,
         }
     }
 
@@ -133,130 +137,87 @@ impl NodeRegistry {
         }
     }
 
-    pub fn index_bisect_right<FCompareNodes>(
-        &self,
-        indices: &[usize],
-        node_before: FCompareNodes,
-        lo: Option<usize>,
-        hi: Option<usize>,
-    ) -> usize
-        where
-            FCompareNodes: Fn(&Node) -> bool,
-    {
-        let lo = lo.unwrap_or(0);
-        let hi = hi.unwrap_or(indices.len());
-        if lo != hi {
-            let predicate = |idx: &usize| -> bool {
-                let node = &self.nodes[*idx];
-                node_before(node)
-            };
-            indices[lo..hi].partition_point(predicate) + lo
-        } else {
-            lo
+    pub fn idx_node_vanilla(&self, cores: f32, memory: f32) -> usize {
+        let pred = |uid: &usize| -> bool {
+            let node = &self.nodes[*uid];
+
+            if node.cores.current < cores || node.memory.current < memory {
+                true
+            } else if cores == node.cores.current {
+                node.memory.current < memory
+            } else {
+                false
+            }
+        };
+
+        self.sorted_vanilla.partition_point(pred)
+    }
+
+    pub fn sort_nodes_vanilla(&mut self, except: &HashSet<usize>) {
+        let nodes = &*self.nodes;
+        let mut indices: Vec<_> = self.sorted_vanilla
+            .drain(0..self.sorted_vanilla.len())
+            .filter_map(|uid| {
+                if !except.contains(&uid) {
+                    Some(uid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.sorted_vanilla.append(&mut indices);
+
+
+        for &uid in except {
+            let node = &nodes[uid];
+            let index = self.idx_node_vanilla(
+                node.cores.current, node.memory.current);
+            self.sorted_vanilla.insert(index, uid);
         }
+        assert_eq!(self.nodes.len(), self.sorted_vanilla.len());
     }
 
-    fn insort_cores(&mut self, node: &Node) {
-        let cores_at_least = |n: &Node| -> bool { n.cores.current < node.cores.current };
-        let idx = self.index_bisect_right(&self.sorted_cores, cores_at_least, None, None);
-        self.sorted_cores.insert(idx, node.uid);
-    }
+    pub fn idx_node_composable(&self, cores: f32, memory: f32) -> usize {
+        let pred = |uid: &usize| -> bool {
+            let node = &self.nodes[*uid];
 
-    fn insort_memory(&mut self, node: &Node) {
-        let memory_at_least = |n: &Node| -> bool { n.memory.current < node.memory.current };
-        let idx = self.index_bisect_right(&self.sorted_memory, memory_at_least, None, None);
-        self.sorted_memory.insert(idx, node.uid);
-    }
-
-    #[allow(dead_code)]
-    pub fn nodes_sorted_cores(&self, at_least: f32) -> impl Iterator<Item=&Node> {
-        let cores_at_least = |n: &Node| -> bool { n.cores.current < at_least };
-        let idx = self.index_bisect_right(&self.sorted_cores, cores_at_least, None, None);
-
-        self.sorted_cores
-            .iter()
-            .skip(idx)
-            .map(|idx| &self.nodes[*idx])
-    }
-
-    pub fn resort_nodes_cores(&mut self) {
-        self.sorted_cores.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
-            self.nodes[*idx1].cores.current.partial_cmp(
-                &self.nodes[*idx2].cores.current)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
-    pub fn resort_nodes_memory(&mut self) {
-        self.sorted_memory.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
-            self.nodes[*idx1].memory.current.partial_cmp(
-                &self.nodes[*idx2].memory.current)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
-    #[allow(dead_code)]
-    pub fn nodes_sorted_memory(&self, at_least: f32) -> impl Iterator<Item=&Node> {
-        let memory_at_least = |n: &Node| -> bool { n.memory.current < at_least };
-        let idx = self.index_bisect_right(&self.sorted_memory, memory_at_least, None, None);
-
-        self.sorted_memory
-            .iter()
-            .skip(idx)
-            .map(|idx| &self.nodes[*idx])
-    }
-
-    #[allow(dead_code)]
-    pub fn idx_sorted_cores(&self, node: &Node) -> usize {
-        let cores_target = node.cores.current;
-        let uid = node.uid;
-
-        let pred_cores = |node: &Node| -> bool { node.cores.current < cores_target };
-
-        let idx_cores = self.index_bisect_right(&self.sorted_cores, pred_cores, None, None);
-
-        let sorted_cores = &self.sorted_cores;
-        let idx_cores = sorted_cores[idx_cores..sorted_cores.len()]
-            .iter()
-            .position(|idx: &usize| self.nodes[*idx].uid == uid)
-            .unwrap()
-            + idx_cores;
-
-        idx_cores
-    }
-
-    pub fn idx_nodes_with_more_memory(&self, memory: f32) -> usize {
-        let pred = |idx: &usize| -> bool {
-            let node = &self.nodes[*idx];
-            node.memory.current < memory
+            if node.cores.current < cores || self.memory_composable[*uid] < memory {
+                true
+            } else if cores == node.cores.current {
+                self.memory_composable[*uid] < memory
+            } else {
+                false
+            }
         };
-        self.sorted_memory.partition_point(pred)
+
+        self.sorted_composable.partition_point(pred)
     }
 
-    pub fn idx_nodes_with_more_cores(&self, cores: f32) -> usize {
-        let pred = |idx: &usize| -> bool {
-            let node = &self.nodes[*idx];
-            node.cores.current < cores
-        };
-        self.sorted_cores.partition_point(pred)
-    }
+    pub fn sort_nodes_composable(&mut self, except: &HashSet<usize>) {
+        let nodes = &*self.nodes;
+        let mut indices: Vec<_> = self.sorted_composable
+            .drain(0..self.sorted_composable.len())
+            .filter_map(|uid| {
+                if !except.contains(&uid) {
+                    Some(uid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.sorted_composable.append(&mut indices);
 
-    #[allow(dead_code)]
-    pub fn idx_sorted_memory(&self, node: &Node) -> usize {
-        let memory_target = node.memory.current;
-        let uid = node.uid;
+        for &uid in except {
+            self.memory_composable[uid] = self.avl_memory_to_node_uid(uid);
+        }
 
-        let pred_memory = |node: &Node| -> bool { node.memory.current < memory_target };
-        let sorted_memory = &self.sorted_memory;
-        let idx_memory = self.index_bisect_right(sorted_memory, pred_memory, None, None);
-
-        let idx_memory = sorted_memory[idx_memory..sorted_memory.len()]
-            .iter()
-            .position(|idx: &usize| self.nodes[*idx].uid == uid)
-            .unwrap()
-            + idx_memory;
-
-        idx_memory
+        for &uid in except {
+            let node = &nodes[uid];
+            let index = self.idx_node_composable(
+                node.cores.current, self.memory_composable[uid]);
+            self.sorted_composable.insert(index, uid);
+        }
     }
 
     pub fn new_connection_from_str(&mut self, line: &str) -> Result<()> {
@@ -309,6 +270,57 @@ impl NodeRegistry {
         self.new_connection(borrower, lenders)
     }
 
+    /// Discovers pareto frontier of nodes. The objective is for nodes to have the highest capacity
+    /// of resources. We can use the pareto frontier to check whether a Job can be scheduled at all
+    /// by checking just a fraction of the total nodes
+    pub fn pareto(&self, composable: bool) -> Vec<ParetoPoint> {
+        let nodes: Vec<_> = self.nodes.iter()
+            .enumerate()
+            .filter_map(|(idx, node)| {
+                if node.cores.current > 0. {
+                    let memory = if composable {
+                        self.avl_memory_to_node_uid(node.uid)
+                    } else {
+                        node.memory.current
+                    };
+
+                    if memory > 0.0 {
+                        Some((idx, node.cores.current, memory))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }).collect();
+
+        nodes.iter()
+            .filter_map(|&(idx, cores, memory)| {
+                if nodes.iter()
+                    .all(|&(other_idx, other_cores, other_memory)| {
+                        if other_cores < cores || other_memory < memory {
+                            other_cores != cores || other_memory != memory || other_idx >= idx
+                        } else if other_cores == cores && other_memory == memory {
+                            other_idx >= idx
+                        } else {
+                            false
+                        }
+                    }) {
+                    Some(ParetoPoint(idx, cores, memory))
+                } else {
+                    None
+                }
+            }).collect()
+
+        // efficient.iter().enumerate().filter_map(|(uid, is_eff) | {
+        //     if *is_eff {
+        //         Some(uid)
+        //     } else {
+        //         None
+        //     }
+        // }).collect()
+    }
+
     pub fn new_connection(
         &mut self,
         uid_borrower: usize,
@@ -335,6 +347,10 @@ impl NodeRegistry {
             borrowers.push(uid_borrower)
         }
         self.connections.insert(uid_borrower, lenders);
+        self.memory_composable[uid_borrower] = self.avl_memory_to_node_uid(uid_borrower);
+
+        let except = HashSet::from([uid_borrower]);
+        self.sort_nodes_composable(&except);
 
         Ok(())
     }
@@ -378,39 +394,25 @@ impl NodeRegistry {
 
         let node = Node::new(uid, name, cores, memory /*, memory_lendable*/)?;
 
-        self.insort_memory(&node);
-        self.insort_cores(&node);
-        self.memory_total.push(node.memory.capacity);
+        self.memory_composable.push(node.memory.capacity);
         self.nodes.push(node);
         self.connections.insert(uid, vec![]);
         self.connections_reverse.insert(uid, vec![]);
+
+        let except = HashSet::from([uid]);
+        self.sort_nodes_vanilla(&except);
+        self.sort_nodes_composable(&except);
+
         Ok(&self.nodes[uid])
     }
 
-    pub fn avl_memory_to_node_uid(&self, uid: usize, own_memory: f32) -> f32 {
+    pub fn avl_memory_to_node_uid(&self, uid: usize) -> f32 {
         let can_borrow: f32 = match self.connections.get(&uid) {
             Some(lenders) => lenders
                 .iter().map(|idx| self.nodes[*idx].memory.current)
                 .sum(),
             None => 0.
         };
-        can_borrow + own_memory
-    }
-
-    pub fn get_max_cores_memory(&self) -> (f32, f32) {
-        let uid_max_cores = *self.sorted_cores.last().unwrap();
-        let max_cores = self.nodes[uid_max_cores].cores.current;
-        let mut max_memory: f32 = 0.0;
-        let idx_min_cores = self.idx_nodes_with_more_cores(0.0);
-
-        for uid in &self.sorted_cores[
-            idx_min_cores..self.sorted_cores.len()] {
-            let uid = *uid;
-            let memory = self.nodes[uid].memory.current;
-            let other_memory = self.avl_memory_to_node_uid(uid, memory);
-            max_memory = max_memory.max(other_memory);
-        }
-
-        (max_cores, max_memory)
+        can_borrow + (&self.nodes[uid]).memory.current
     }
 }
