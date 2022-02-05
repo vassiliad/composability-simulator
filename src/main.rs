@@ -24,6 +24,8 @@ use std::time::SystemTime;
 use anyhow::bail;
 use anyhow::Result;
 
+use registry::ParetoPoint;
+
 mod job;
 mod job_factory;
 
@@ -91,15 +93,21 @@ fn main() -> Result<()> {
             println!("{:#?}) At tick {}, finished: {} - running: {} - queueing: {}",
                      since_beg, sched.now, sched.jobs_done.len(), sched.jobs_running.len(),
                      sched.jobs_queuing.len());
-            let (cores, memory) = sched.registry.get_max_cores_memory();
-            println!("  Max cores: {}, Max memory: {}", cores, memory);
+
+            let pareto = sched.registry.pareto(true);
+
+            for &ParetoPoint(uid, cores, memory) in &pareto {
+                println!("  {}: cores {}, memory {}",
+                         sched.registry.nodes[uid].name, cores, memory);
+            }
+
             println!("  Simulator throughput events: {}", throughput_delta);
             println!("  Simulator throughput events/sec: {}",
                      throughput_delta as f32 / (delta.as_secs_f32()));
             throughput_delta = 0;
         }
         if sched.has_unschedulable() {
-            break
+            break;
         }
     }
     let delta = SystemTime::now().duration_since(start).unwrap();
