@@ -126,10 +126,12 @@ mod test_scheduler {
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
 
-        while sched.tick() {}
+        let mut steps = 0;
+        while sched.tick() && steps < 10000 { steps += 1; }
 
-        assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
+
         Ok(())
     }
 

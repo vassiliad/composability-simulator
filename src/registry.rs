@@ -31,6 +31,10 @@ use crate::node::Node;
 
 pub type UIDFactory = HashMap<String, usize>;
 
+// VV: UID, cores, memory
+#[derive(Debug)]
+pub struct ParetoPoint(pub usize, pub f32, pub f32);
+
 pub struct NodeRegistry {
     pub registry: UIDFactory,
     pub nodes: Vec<Node>,
@@ -309,6 +313,57 @@ impl NodeRegistry {
         self.new_connection(borrower, lenders)
     }
 
+    /// Discovers pareto frontier of nodes. The objective is for nodes to have the highest capacity
+    /// of resources. We can use the pareto frontier to check whether a Job can be scheduled at all
+    /// by checking just a fraction of the total nodes
+    pub fn pareto(&self, composable: bool) -> Vec<ParetoPoint> {
+        let nodes: Vec<_> = self.nodes.iter()
+            .enumerate()
+            .filter_map(|(idx, node)| {
+                if node.cores.current > 0. {
+                    let memory = if composable {
+                        self.avl_memory_to_node_uid(node.uid)
+                    } else {
+                        node.memory.current
+                    };
+
+                    if memory > 0.0 {
+                        Some((idx, node.cores.current, memory))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }).collect();
+
+        nodes.iter()
+            .filter_map(|&(idx, cores, memory)| {
+                if nodes.iter()
+                    .all(|&(other_idx, other_cores, other_memory)| {
+                        if other_cores < cores || other_memory < memory {
+                            other_cores != cores || other_memory != memory || other_idx >= idx
+                        } else if other_cores == cores && other_memory == memory {
+                            other_idx >= idx
+                        } else {
+                            false
+                        }
+                    }) {
+                    Some(ParetoPoint(idx, cores, memory))
+                } else {
+                    None
+                }
+            }).collect()
+
+        // efficient.iter().enumerate().filter_map(|(uid, is_eff) | {
+        //     if *is_eff {
+        //         Some(uid)
+        //     } else {
+        //         None
+        //     }
+        // }).collect()
+    }
+
     pub fn new_connection(
         &mut self,
         uid_borrower: usize,
@@ -387,30 +442,13 @@ impl NodeRegistry {
         Ok(&self.nodes[uid])
     }
 
-    pub fn avl_memory_to_node_uid(&self, uid: usize, own_memory: f32) -> f32 {
+    pub fn avl_memory_to_node_uid(&self, uid: usize) -> f32 {
         let can_borrow: f32 = match self.connections.get(&uid) {
             Some(lenders) => lenders
                 .iter().map(|idx| self.nodes[*idx].memory.current)
                 .sum(),
             None => 0.
         };
-        can_borrow + own_memory
-    }
-
-    pub fn get_max_cores_memory(&self) -> (f32, f32) {
-        let uid_max_cores = *self.sorted_cores.last().unwrap();
-        let max_cores = self.nodes[uid_max_cores].cores.current;
-        let mut max_memory: f32 = 0.0;
-        let idx_min_cores = self.idx_nodes_with_more_cores(0.0);
-
-        for uid in &self.sorted_cores[
-            idx_min_cores..self.sorted_cores.len()] {
-            let uid = *uid;
-            let memory = self.nodes[uid].memory.current;
-            let other_memory = self.avl_memory_to_node_uid(uid, memory);
-            max_memory = max_memory.max(other_memory);
-        }
-
-        (max_cores, max_memory)
+        can_borrow + self.nodes[uid].memory.current
     }
 }
