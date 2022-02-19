@@ -123,7 +123,7 @@ impl Scheduler
     fn job_commit_allocate(
         registry: &mut NodeRegistry,
         job: &mut Job,
-        choice: (usize, Vec<(usize, f32)>)) -> ()
+        choice: (usize, Vec<(usize, f32)>))
     {
         let (uid_cores, mut all_memory) = choice;
 

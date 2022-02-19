@@ -449,6 +449,6 @@ impl NodeRegistry {
                 .sum(),
             None => 0.
         };
-        can_borrow + (&self.nodes[uid]).memory.current
+        can_borrow + self.nodes[uid].memory.current
     }
 }
