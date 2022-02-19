@@ -34,8 +34,8 @@ use std::str::FromStr;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
-use clap::App;
 use clap::Arg;
+use clap::Command;
 
 #[derive(Debug)]
 struct Node {
@@ -84,7 +84,7 @@ struct Arguments {
 }
 
 fn parse_arguments() -> Result<Arguments> {
-    let app = App::new("Parse google trace machine events")
+    let app = Command::new("Parse google trace machine events")
         .version("0.1.0")
         .author("Vassilis Vassiliadis")
         .about("Generates a nodes and connections file for dismem simulator")
