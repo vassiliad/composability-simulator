@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufRead;
@@ -27,10 +28,17 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
 
 use crate::job::Job;
 use crate::job::reset_job_metadata;
+
+pub struct JobInWorkflow {
+    pub job: Job,
+    pub workflow: usize,
+
+}
 
 pub trait JobFactory {
     fn job_peek(&self) -> Option<&Job>;
@@ -40,10 +48,26 @@ pub trait JobFactory {
     fn jobs_done(&self) -> &Vec<usize>;
 }
 
+
 pub struct JobStreaming {
     pub reader: Box<dyn BufRead>,
     jobs_done: Vec<usize>,
     next_job: Option<Job>,
+}
+
+#[derive(Hash)]
+struct JobUidWfUid(usize, usize);
+
+pub struct JobWorkflowFactory {
+    pub jobs_dependencies: HashMap<usize, Vec<usize>>,
+    pub jobs_templates: HashMap<usize, Job>,
+    jobs_done: Vec<usize>,
+    jobs_ready: Vec<JobUidWfUid>,
+    jobs_queue: HashMap<JobInWorkflow, Vec<usize>>,
+    job_uid_to_wf_uid: HashMap<usize, usize>,
+    now: f32,
+    pub reader: Box<dyn BufRead>,
+    pub writer: Option<Box<dyn Write>>,
 }
 
 pub struct JobStreamingWithOutput {
@@ -150,22 +174,22 @@ impl JobStreaming {
     }
 }
 
-impl JobStreamingWithOutput {
-    fn make_writer(path: &Path) -> Result<Box<dyn Write>> {
-        let file = File::create(path);
-        if let Err(x) = file {
-            bail!("Unable to create file \"{}\" because: {:?}", path.display(), x)
-        }
-
-        let mut writer = Box::new(BufWriter::new(file.unwrap())) as Box<dyn Write>;
-        if let Err(x) = writeln!(writer, "#uid:usize;cores:f32;memory:f32;duration:f32;\
-            can_borrow:y/n;time_created:f32;time_started:f32;time_done:f32;uid_node_cores:usize;\
-            [uid_node_memory:usize;memory_alloc:f32]+") {
-            bail!("Unable to write header to path {} because of {:?}", path.display(), x)
-        }
-        Ok(writer)
+fn make_writer(path: &Path) -> Result<Box<dyn Write>> {
+    let file = File::create(path);
+    if let Err(x) = file {
+        bail!("Unable to create file \"{}\" because: {:?}", path.display(), x)
     }
 
+    let mut writer = Box::new(BufWriter::new(file.unwrap())) as Box<dyn Write>;
+    if let Err(x) = writeln!(writer, "#uid:usize;cores:f32;memory:f32;duration:f32;\
+        can_borrow:y/n;time_created:f32;time_started:f32;time_done:f32;uid_node_cores:usize;\
+        [uid_node_memory:usize;memory_alloc:f32]+") {
+        bail!("Unable to write header to path {} because of {:?}", path.display(), x)
+    }
+    Ok(writer)
+}
+
+impl JobStreamingWithOutput {
     pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
@@ -185,7 +209,7 @@ impl JobStreamingWithOutput {
 
     pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self> {
         let inner = JobStreaming::from_reader(reader);
-        let writer = JobStreamingWithOutput::make_writer(output_path)?;
+        let writer = make_writer(output_path)?;
         Ok(Self { inner, writer })
     }
 }
@@ -241,5 +265,184 @@ impl JobFactory for JobStreamingWithOutput {
 
     fn jobs_done(&self) -> &Vec<usize> {
         &self.inner.jobs_done
+    }
+}
+
+impl JobWorkflowFactory {
+    pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
+        let file = File::open(path);
+        if let Err(x) = file {
+            bail!("Unable to open file \"{}\" because: {:?}", path.display(), x)
+        }
+
+        let reader = Box::new(BufReader::new(file.unwrap())) as Box<dyn BufRead>;
+
+        Self::from_reader_to_path(reader, output_path)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_string(content: String) -> Result<Self> {
+        let reader = Box::new(Cursor::new(content));
+        Self::from_reader(reader)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_string_to_path(content: String, output_path: &Path) -> Result<Self> {
+        let reader = Box::new(Cursor::new(content));
+        Self::from_reader_to_path(reader, output_path)
+    }
+
+    pub fn from_reader(reader: Box<dyn BufRead>) -> Result<Self> {
+        let mut ret = Self {
+            reader,
+            writer: None,
+            jobs_done: vec![],
+            jobs_ready: vec![],
+            jobs_queue: HashMap::new(),
+            job_uid_to_wf_uid: HashMap::new(),
+            now: 0.0,
+            jobs_templates: HashMap::new(),
+            jobs_dependencies: HashMap::new(),
+        };
+
+        ret.parse_workflow_instructions()?;
+
+        Ok(ret)
+    }
+
+    pub fn from_reader_to_path(reader: Box<dyn BufRead>, output_path: &Path) -> Result<Self> {
+        let writer = make_writer(output_path)?;
+        let mut ret = Self {
+            reader,
+            writer: Some(writer),
+            jobs_done: vec![],
+            jobs_ready: vec![],
+            jobs_queue: HashMap::new(),
+            job_uid_to_wf_uid: HashMap::new(),
+            now: 0.0,
+            jobs_templates: HashMap::new(),
+            jobs_dependencies: HashMap::new(),
+        };
+
+        ret.parse_workflow_instructions()?;
+
+        Ok(ret)
+    }
+
+    fn get_next_line(&mut self) -> Result<Option<String>> {
+        let mut line: String = String::new();
+        loop {
+            let read = self.reader.read_line(&mut line);
+            match read {
+                Ok(0) => break,
+                Ok(_) => {
+                    // VV: Skip empty lines, and lines starting with a "#"
+                    line = line.trim().to_owned();
+
+                    if line.starts_with('#') || line.is_empty() {
+                        line.clear();
+                        continue;
+                    }
+
+                    return Ok(Some(line));
+                }
+                Err(x) => bail!("Could not read next line due to {}", x),
+            }
+        }
+        Ok(None)
+    }
+
+    fn parse_workflow_instructions(&mut self) -> Result<()> {
+        let mut reading_jobs = true;
+        let mut replicate: usize = 1;
+
+        loop {
+            let line;
+            match self.get_next_line()? {
+                None => { break },
+                Some(l) => {
+                    if l.starts_with(':') {
+                        if l == ":dependencies" {
+                            if !reading_jobs {
+                                bail!("Got {l} but already reading dependencies");
+                            }
+                            reading_jobs = false;
+                        } else if l.starts_with(":replicate ") {
+                            replicate = match l[11..].parse() {
+                                Ok(r) => r,
+                                Err(msg) => bail!(msg),
+                            }
+                        } else {
+                            bail!("Unknown command {l}");
+                        }
+                        continue
+                    }
+                    line = l;
+                }
+            }
+
+            // println!("reading line {line}");
+            if reading_jobs {
+                let job: Job = match line.parse() {
+                    Ok(job) => { job },
+                    Err(msg) => { bail!(msg) }
+                };
+                let uid = job.uid;
+                self.jobs_templates.insert(uid, job);
+            } else {
+                let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
+                let consumer: usize = match tokens[0].parse() {
+                    Ok(uid) => uid,
+                    Err(msg) => bail!("Unable to parse consumer uid in dependency line {line}")
+                };
+                if !self.jobs_templates.contains_key(&consumer) {
+                    bail!("Unknown consumer Job {consumer} defined in line {line}");
+                }
+                if self.jobs_dependencies.contains_key(&consumer) {
+                    bail!("Dependencies of consumer Job {consumer} in line {line} \
+                        have already been defined.");
+                }
+                let mut producers = vec![];
+
+                for t in tokens.iter().skip(1) {
+                    let producer: usize = match t.parse() {
+                        Ok(uid) => uid,
+                        Err(msg) => bail!("Unable to parse consumer uid in dependency line {line}")
+                    };
+                    if !self.jobs_templates.contains_key(&producer) {
+                        bail!("Unknown producer Job {producer} defined in line {line}");
+                    }
+                    producers.push(producer);
+                }
+                self.jobs_dependencies.insert(consumer, producers);
+            }
+        }
+
+        // println!("Loaded Jobs {:?}", self.jobs_templates);
+        // println!("Dependencies {:?}", self.jobs_dependencies);
+        // println!("Replicate workflow {replicate} times");
+        Ok(())
+    }
+}
+
+impl JobFactory for JobWorkflowFactory {
+    fn job_peek(&self) -> Option<&Job> {
+        todo!()
+    }
+
+    fn job_get(&mut self) -> Job {
+        todo!()
+    }
+
+    fn job_mark_done(&mut self, job: &Job) {
+        self.jobs_done.push(job.uid)
+    }
+
+    fn more_jobs(&self) -> bool {
+        todo!()
+    }
+
+    fn jobs_done(&self) -> &Vec<usize> {
+        &self.jobs_done
     }
 }
