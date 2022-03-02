@@ -25,6 +25,7 @@ use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Cursor;
 use std::io::Write;
+use std::ops::Deref;
 use std::path::Path;
 
 use anyhow::bail;
@@ -33,12 +34,6 @@ use anyhow::Result;
 
 use crate::job::Job;
 use crate::job::reset_job_metadata;
-
-pub struct JobInWorkflow {
-    pub job: Job,
-    pub workflow: usize,
-
-}
 
 pub trait JobFactory {
     fn job_peek(&self) -> Option<&Job>;
@@ -55,16 +50,15 @@ pub struct JobStreaming {
     next_job: Option<Job>,
 }
 
-#[derive(Hash)]
-struct JobUidWfUid(usize, usize);
-
 pub struct JobWorkflowFactory {
     pub jobs_dependencies: HashMap<usize, Vec<usize>>,
     pub jobs_templates: HashMap<usize, Job>,
     jobs_done: Vec<usize>,
-    jobs_ready: Vec<JobUidWfUid>,
-    jobs_queue: HashMap<JobInWorkflow, Vec<usize>>,
-    job_uid_to_wf_uid: HashMap<usize, usize>,
+    jobs_ready: VecDeque<Job>,
+    // VV: job_queue = {wf_uid: {consumer_uid: (JobObject, [producer_uid])}
+    // Note that the UIDs are the UIDs of the REPLICATED jobs
+    jobs_queue: HashMap<usize, HashMap<usize, (Job, Vec<usize>)>>,
+    // job_uid_to_wf_uid: HashMap<usize, usize>,
     now: f32,
     pub reader: Box<dyn BufRead>,
     pub writer: Option<Box<dyn Write>>,
@@ -297,9 +291,9 @@ impl JobWorkflowFactory {
             reader,
             writer: None,
             jobs_done: vec![],
-            jobs_ready: vec![],
+            jobs_ready: VecDeque::new(),
             jobs_queue: HashMap::new(),
-            job_uid_to_wf_uid: HashMap::new(),
+            // job_uid_to_wf_uid: HashMap::new(),
             now: 0.0,
             jobs_templates: HashMap::new(),
             jobs_dependencies: HashMap::new(),
@@ -316,9 +310,9 @@ impl JobWorkflowFactory {
             reader,
             writer: Some(writer),
             jobs_done: vec![],
-            jobs_ready: vec![],
+            jobs_ready: VecDeque::new(),
             jobs_queue: HashMap::new(),
-            job_uid_to_wf_uid: HashMap::new(),
+            // job_uid_to_wf_uid: HashMap::new(),
             now: 0.0,
             jobs_templates: HashMap::new(),
             jobs_dependencies: HashMap::new(),
@@ -355,6 +349,7 @@ impl JobWorkflowFactory {
     fn parse_workflow_instructions(&mut self) -> Result<()> {
         let mut reading_jobs = true;
         let mut replicate: usize = 1;
+        let mut expected_uid: usize = 0;
 
         loop {
             let line;
@@ -388,7 +383,11 @@ impl JobWorkflowFactory {
                     Err(msg) => { bail!(msg) }
                 };
                 let uid = job.uid;
+                if uid != expected_uid {
+                    bail!("Expected uid {expected_uid} for job {job}")
+                }
                 self.jobs_templates.insert(uid, job);
+                expected_uid += 1;
             } else {
                 let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
                 let consumer: usize = match tokens[0].parse() {
@@ -421,21 +420,80 @@ impl JobWorkflowFactory {
         // println!("Loaded Jobs {:?}", self.jobs_templates);
         // println!("Dependencies {:?}", self.jobs_dependencies);
         // println!("Replicate workflow {replicate} times");
+
+        // VV: Uids in @ready and @queue refer to UIDs in @job_templates
+        // VV: [job_uid]
+        let mut ready: Vec<usize> = vec![];
+        // VV: consumer_uid: [producer_uid]
+        let mut queue: HashMap<usize, Vec<usize>> = HashMap::new();
+        let empty = vec![];
+
+        for x in self.jobs_templates.keys() {
+            let deps = match self.jobs_dependencies.get(x) {
+                None => &empty[..],
+                Some(x) => &x[..],
+            };
+
+            if deps.is_empty() {
+                ready.push(*x);
+            } else {
+                queue.insert(*x, Vec::from(deps));
+            }
+        }
+
+        for wf_uid in 0..replicate {
+            for j in &ready {
+                let mut job = self.jobs_templates.get(j)
+                    .expect(&format!("Expected to find JobTemplate {}", j))
+                    .to_owned();
+                job.uid = job.uid + wf_uid * self.jobs_templates.len();
+
+                self.jobs_ready.push_back(job)
+            }
+
+            if !queue.is_empty() {
+                let mut wf_queue = HashMap::new();
+                for (j, producers) in &queue {
+                    let mut job = self.jobs_templates.get(j)
+                        .expect(&format!("Expected to find JobTemplate {}", j))
+                        .to_owned();
+                    let offset = wf_uid * self.jobs_templates.len();
+                    job.uid = job.uid + offset;
+                    let producers: Vec<_> = producers.iter().map(|p| p + offset).collect();
+
+                    wf_queue.insert(job.uid, (job, producers));
+                }
+                self.jobs_queue.insert(wf_uid, wf_queue);
+            }
+        }
+
+        println!("Ready to execute jobs {:?}", self.jobs_ready);
+        println!("Queueing jobs {:?}", self.jobs_queue);
+
         Ok(())
     }
 }
 
 impl JobFactory for JobWorkflowFactory {
     fn job_peek(&self) -> Option<&Job> {
-        todo!()
+        if !self.jobs_ready.is_empty() {
+            return self.jobs_ready.get(0);
+        } else {
+            return None;
+        }
     }
 
+
     fn job_get(&mut self) -> Job {
-        todo!()
+        self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job")
     }
 
     fn job_mark_done(&mut self, job: &Job) {
-        self.jobs_done.push(job.uid)
+        self.now = self.now.max(job.time_done.unwrap());
+        let wf_uid = job.uid / self.jobs_templates.len();
+
+
+        self.jobs_done.push(job.uid);
     }
 
     fn more_jobs(&self) -> bool {

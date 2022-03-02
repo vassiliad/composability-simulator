@@ -62,6 +62,12 @@ mod test_job_factory {
         assert_eq!(factory.jobs_dependencies.get(&0), None);
         assert_eq!(factory.jobs_dependencies.get(&1), Some(&vec![0]));
 
+        println!("Next up: {:?}", factory.job_peek());
+
+        assert_eq!(factory.job_peek().is_none(), false);
+
+        // assert!(false);
+
         Ok(())
     }
 }

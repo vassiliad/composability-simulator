@@ -35,7 +35,7 @@ pub fn reset_job_metadata() {
     NEXT_JOB_UID.store(0, Ordering::SeqCst);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Job {
     pub uid: usize,
     pub cores: f32,
