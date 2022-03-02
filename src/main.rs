@@ -68,8 +68,13 @@ fn main() -> Result<()> {
     println!("Instantiating scheduler");
     let mut sched = scheduler::Scheduler::new(registry, jfactory);
 
+    let first_job_at = match sched.job_factory.job_peek() {
+        Some(j) => j.time_created,
+        None => 0.0,
+    };
 
-    println!("Starting simulation");
+    println!("Starting simulation - first job arrives at {first_job_at}");
+
     let report_every_secs = 5.0;
     let mut last_report_time = SystemTime::now();
     let start = last_report_time;
@@ -113,7 +118,7 @@ fn main() -> Result<()> {
     let delta = SystemTime::now().duration_since(start).unwrap();
 
     println!("{}) Scheduled {} jobs in simulated seconds {}",
-             delta.as_secs_f32(), sched.jobs_done.len(), sched.now);
+             delta.as_secs_f32(), sched.jobs_done.len(), sched.now - first_job_at);
 
     if sched.has_unschedulable() {
         eprintln!("There were {} unschedulable jobs", sched.jobs_queuing.len());
