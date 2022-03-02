@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use dismem::job::Job;
-use dismem::job::reset_job_metadata;
-use dismem::job_factory::JobCollection;
-use dismem::registry::NodeRegistry;
-use dismem::scheduler::Scheduler;
+use compsim::job::Job;
+use compsim::job::reset_job_metadata;
+use compsim::job_factory::JobCollection;
+use compsim::registry::NodeRegistry;
+use compsim::scheduler::Scheduler;
 
 #[cfg(test)]
 mod test_scheduler {

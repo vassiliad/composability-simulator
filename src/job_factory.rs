@@ -137,7 +137,11 @@ impl JobStreaming {
                         continue;
                     }
 
-                    self.next_job = Some(line.parse().unwrap());
+                    let job: Job = line.parse().unwrap();
+                    if job.node_cores.is_some() {
+                        panic!("Job {line} cannot define uid of node it got scheduled on");
+                    }
+                    self.next_job = Some(job);
                     break;
                 }
                 Err(x) => panic!("Could not read next line due to {}", x),

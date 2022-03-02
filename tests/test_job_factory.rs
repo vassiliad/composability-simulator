@@ -1,11 +1,10 @@
-// use dismem::job::reset_job_metadata;
 use anyhow::Result;
 
-use dismem::job_factory::JobStreaming;
+use compsim::job_factory::JobStreaming;
 
 #[cfg(test)]
 mod test_job_factory {
-    use dismem::job_factory::JobFactory;
+    use compsim::job_factory::JobFactory;
 
     use super::*;
 
