@@ -54,10 +54,10 @@ pub struct JobWorkflowFactory {
     pub jobs_dependencies: HashMap<usize, Vec<usize>>,
     pub jobs_templates: HashMap<usize, Job>,
     jobs_done: Vec<usize>,
-    jobs_ready: VecDeque<Job>,
+    pub jobs_ready: VecDeque<Job>,
     // VV: job_queue = {wf_uid: {consumer_uid: (JobObject, [producer_uid])}
     // Note that the UIDs are the UIDs of the REPLICATED jobs
-    jobs_queue: HashMap<usize, HashMap<usize, (Job, Vec<usize>)>>,
+    pub jobs_queue: HashMap<usize, HashMap<usize, (Job, Vec<usize>)>>,
     // job_uid_to_wf_uid: HashMap<usize, usize>,
     now: f32,
     pub reader: Box<dyn BufRead>,
@@ -378,7 +378,7 @@ impl JobWorkflowFactory {
 
             // println!("reading line {line}");
             if reading_jobs {
-                let job: Job = match line.parse() {
+                let mut job: Job = match line.parse() {
                     Ok(job) => { job },
                     Err(msg) => { bail!(msg) }
                 };
@@ -386,13 +386,15 @@ impl JobWorkflowFactory {
                 if uid != expected_uid {
                     bail!("Expected uid {expected_uid} for job {job}")
                 }
+                job.time_created = f32::MAX;
                 self.jobs_templates.insert(uid, job);
                 expected_uid += 1;
             } else {
                 let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
                 let consumer: usize = match tokens[0].parse() {
                     Ok(uid) => uid,
-                    Err(msg) => bail!("Unable to parse consumer uid in dependency line {line}")
+                    Err(msg) => bail!("Unable to parse consumer uid in dependency line {line} \
+                        because of {msg}")
                 };
                 if !self.jobs_templates.contains_key(&consumer) {
                     bail!("Unknown consumer Job {consumer} defined in line {line}");
@@ -406,7 +408,8 @@ impl JobWorkflowFactory {
                 for t in tokens.iter().skip(1) {
                     let producer: usize = match t.parse() {
                         Ok(uid) => uid,
-                        Err(msg) => bail!("Unable to parse consumer uid in dependency line {line}")
+                        Err(msg) => bail!("Unable to parse consumer uid in dependency line \
+                            {line}i because of {msg}")
                     };
                     if !self.jobs_templates.contains_key(&producer) {
                         bail!("Unknown producer Job {producer} defined in line {line}");
@@ -447,7 +450,7 @@ impl JobWorkflowFactory {
                     .expect(&format!("Expected to find JobTemplate {}", j))
                     .to_owned();
                 job.uid = job.uid + wf_uid * self.jobs_templates.len();
-
+                job.time_created = self.now;
                 self.jobs_ready.push_back(job)
             }
 
@@ -485,19 +488,60 @@ impl JobFactory for JobWorkflowFactory {
 
 
     fn job_get(&mut self) -> Job {
-        self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job")
+        let mut job = self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job");
+        job.time_created = self.now;
+
+        job
     }
 
     fn job_mark_done(&mut self, job: &Job) {
         self.now = self.now.max(job.time_done.unwrap());
         let wf_uid = job.uid / self.jobs_templates.len();
-
-
+        let job_uid = job.uid;
         self.jobs_done.push(job.uid);
+
+        let mut new_ready = vec![];
+
+        match self.jobs_queue.get_mut(&wf_uid) {
+            None => (),
+            Some(queue) => {
+                for (qj_uid, (_job, producers)) in queue.iter_mut() {
+                    if let Some(index) = producers.iter().position(|&x| x == job_uid) {
+                        producers.remove(index);
+                    }
+                    // VV: mark that this queued job is ready and in a future step take it
+                    // out of @jobs_queue and create new entries in @jobs_ready
+                    if producers.is_empty() {
+                        new_ready.push((wf_uid, *qj_uid));
+                    }
+                }
+            }
+        }
+
+        for (wf, ruid) in &new_ready {
+            let queue_empty;
+
+            {
+                let queue = self.jobs_queue.get_mut(&wf_uid)
+                    .expect(&format!("There is a ready job {ruid} from workflow {wf} but \
+                        the record for it in the queue is missing"));
+                let (mut job, _) = queue.remove(&ruid)
+                    .expect(&format!("Job {ruid} is ready but cannot be found in queue"));
+                job.time_created = self.now;
+                self.jobs_ready.push_back(job);
+                queue_empty = queue.is_empty();
+            }
+
+            if queue_empty {
+                self.jobs_queue.remove(wf)
+                    .expect(&format!("All queued jobs for workflow {wf} are now ready \
+                        however the record for this workflow is not found in the queue"));
+            }
+        }
     }
 
     fn more_jobs(&self) -> bool {
-        todo!()
+        (!self.jobs_ready.is_empty()) | (!self.jobs_queue.is_empty())
     }
 
     fn jobs_done(&self) -> &Vec<usize> {
