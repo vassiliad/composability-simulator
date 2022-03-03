@@ -25,11 +25,9 @@ use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Cursor;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::Path;
 
 use anyhow::bail;
-use anyhow::Context;
 use anyhow::Result;
 
 use crate::job::Job;
@@ -263,6 +261,7 @@ impl JobFactory for JobStreamingWithOutput {
 }
 
 impl JobWorkflowFactory {
+    #[allow(dead_code)]
     pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
         let file = File::open(path);
         if let Err(x) = file {
@@ -362,8 +361,8 @@ impl JobWorkflowFactory {
                                 bail!("Got {l} but already reading dependencies");
                             }
                             reading_jobs = false;
-                        } else if l.starts_with(":replicate ") {
-                            replicate = match l[11..].parse() {
+                        } else if let Some(stripped) = l.strip_prefix(":replicate ") {
+                            replicate = match stripped.parse() {
                                 Ok(r) => r,
                                 Err(msg) => bail!(msg),
                             }

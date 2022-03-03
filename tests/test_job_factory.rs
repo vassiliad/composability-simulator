@@ -57,7 +57,7 @@ mod test_job_factory {
 
         println!("{}", content);
 
-        let mut factory = JobWorkflowFactory::from_string(content.to_string())?;
+        let factory = JobWorkflowFactory::from_string(content.to_string())?;
 
         assert_eq!(factory.jobs_dependencies.get(&0), None);
         assert_eq!(factory.jobs_dependencies.get(&1), Some(&vec![0]));
