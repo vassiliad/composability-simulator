@@ -170,51 +170,45 @@ impl FromStr for Job {
                 num, tokens));
         }
 
-        let uid: usize;
-        if tokens[0] == "?" {
-            uid = NEXT_JOB_UID.fetch_or(0, Ordering::SeqCst);
+        let uid: usize = if tokens[0] == "?" {
+            NEXT_JOB_UID.fetch_or(0, Ordering::SeqCst)
         } else if let Ok(c) = tokens[0].parse() {
-            uid = c;
+            c
         } else {
             return Err(format!("Invalid uid \"{}\"", tokens[0]));
-        }
+        };
 
-        let cores: f32;
-        if let Ok(c) = tokens[1].parse() {
-            cores = c;
+        let cores: f32 = if let Ok(c) = tokens[1].parse() {
+            c
         } else {
             return Err(format!("Invalid cores \"{}\"", tokens[1]));
-        }
+        };
 
-        let memory: f32;
-        if let Ok(c) = tokens[2].parse() {
-            memory = c;
+        let memory: f32 = if let Ok(c) = tokens[2].parse() {
+            c
         } else {
             return Err(format!("Invalid memory \"{}\"", tokens[2]));
-        }
+        };
 
-        let duration: f32;
-        if let Ok(c) = tokens[3].parse() {
-            duration = c;
+        let duration: f32 = if let Ok(c) = tokens[3].parse() {
+            c
         } else {
             return Err(format!("Invalid duration \"{}\"", tokens[3]));
-        }
+        };
 
-        let borrow: bool;
-        if tokens[4] == "y" {
-            borrow = true;
+        let borrow: bool = if tokens[4] == "y" {
+            true
         } else if tokens[4] == "n" {
-            borrow = false;
+            false
         } else {
             return Err(format!("borrow may only be y or n but found \"{}\"", tokens[4]));
-        }
+        };
 
-        let time_created: f32;
-        if let Ok(c) = tokens[5].parse() {
-            time_created = c;
+        let time_created: f32 = if let Ok(c) = tokens[5].parse() {
+            c
         } else {
             return Err(format!("Invalid time_created \"{}\"", tokens[5]));
-        }
+        };
 
         let mut job = Self::new_with_uid(
             uid,
