@@ -479,11 +479,7 @@ impl JobWorkflowFactory {
 
 impl JobFactory for JobWorkflowFactory {
     fn job_peek(&self) -> Option<&Job> {
-        if !self.jobs_ready.is_empty() {
-            return self.jobs_ready.get(0);
-        } else {
-            return None;
-        }
+        self.jobs_ready.get(0)
     }
 
 
