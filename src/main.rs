@@ -194,10 +194,17 @@ fn main() -> Result<()> {
                      since_beg, sched.now, sched.jobs_done.len(), sched.jobs_running.len(),
                      sched.jobs_queuing.len());
 
-            let pareto = sched.registry.pareto(true);
+            let idle = sched.registry.nodes.iter().filter(|&n| {
+                n.memory.capacity == n.memory.current &&
+                    n.cores.capacity == n.cores.current
+            }).count();
 
+            println!("  Idle nodes {idle}/{}", sched.registry.nodes.len());
+
+            println!("  Nodes in pareto front:");
+            let pareto = sched.registry.pareto(true);
             for &ParetoPoint(uid, cores, memory) in &pareto {
-                println!("  {}: cores {}, memory {}",
+                println!("    {}: cores {}, memory {}",
                          sched.registry.nodes[uid].name, cores, memory);
             }
 
