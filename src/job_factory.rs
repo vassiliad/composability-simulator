@@ -19,6 +19,7 @@ under the License.
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::default::Default;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -56,7 +57,6 @@ pub struct JobWorkflowFactory {
     // VV: job_queue = {wf_uid: {consumer_uid: (JobObject, [producer_uid])}
     // Note that the UIDs are the UIDs of the REPLICATED jobs
     pub jobs_queue: HashMap<usize, HashMap<usize, (Job, Vec<usize>)>>,
-    // job_uid_to_wf_uid: HashMap<usize, usize>,
     now: f32,
     pub reader: Box<dyn BufRead>,
     pub writer: Option<Box<dyn Write>>,
@@ -260,6 +260,21 @@ impl JobFactory for JobStreamingWithOutput {
     }
 }
 
+impl Default for JobWorkflowFactory {
+    fn default() -> Self {
+        Self {
+            reader: Box::new(Cursor::new("")),
+            writer: None,
+            jobs_done: vec![],
+            jobs_ready: VecDeque::new(),
+            jobs_queue: HashMap::new(),
+            now: 0.0,
+            jobs_templates: HashMap::new(),
+            jobs_dependencies: HashMap::new(),
+        }
+    }
+}
+
 impl JobWorkflowFactory {
     #[allow(dead_code)]
     pub fn from_path_to_path(path: &Path, output_path: &Path) -> Result<Self> {
@@ -289,13 +304,7 @@ impl JobWorkflowFactory {
         let mut ret = Self {
             reader,
             writer: None,
-            jobs_done: vec![],
-            jobs_ready: VecDeque::new(),
-            jobs_queue: HashMap::new(),
-            // job_uid_to_wf_uid: HashMap::new(),
-            now: 0.0,
-            jobs_templates: HashMap::new(),
-            jobs_dependencies: HashMap::new(),
+            ..Default::default()
         };
 
         ret.parse_workflow_instructions()?;
@@ -308,13 +317,7 @@ impl JobWorkflowFactory {
         let mut ret = Self {
             reader,
             writer: Some(writer),
-            jobs_done: vec![],
-            jobs_ready: VecDeque::new(),
-            jobs_queue: HashMap::new(),
-            // job_uid_to_wf_uid: HashMap::new(),
-            now: 0.0,
-            jobs_templates: HashMap::new(),
-            jobs_dependencies: HashMap::new(),
+            ..Default::default()
         };
 
         ret.parse_workflow_instructions()?;
