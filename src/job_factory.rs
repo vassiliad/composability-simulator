@@ -472,8 +472,8 @@ impl JobWorkflowFactory {
             }
         }
 
-        println!("Ready to execute jobs {:?}", self.jobs_ready);
-        println!("Queueing jobs {:?}", self.jobs_queue);
+        // println!("Ready to execute jobs {:?}", self.jobs_ready);
+        // println!("Queueing jobs {:?}", self.jobs_queue);
 
         Ok(())
     }
@@ -497,6 +497,11 @@ impl JobFactory for JobWorkflowFactory {
         let wf_uid = job.uid / self.jobs_templates.len();
         let job_uid = job.uid;
         self.jobs_done.push(job.uid);
+
+        if let Some(writer) = self.writer.as_deref_mut() {
+            writeln!(writer, "{}", job).unwrap();
+            writer.flush().unwrap();
+        }
 
         let mut new_ready = vec![];
 

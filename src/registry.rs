@@ -320,7 +320,7 @@ impl NodeRegistry {
         let nodes: Vec<_> = self.nodes.iter()
             .enumerate()
             .filter_map(|(idx, node)| {
-                if node.cores.current > 0. {
+                if node.cores.current >= 0. {
                     let memory = if composable {
                         self.avl_memory_to_node_uid(node.uid)
                     } else {
