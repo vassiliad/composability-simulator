@@ -16,7 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
 use crate::job::Job;
@@ -31,7 +31,7 @@ pub struct Scheduler
 
     pub jobs_queuing: VecDeque<Job>,
     pub jobs_running: VecDeque<Job>,
-    pub jobs_done: HashSet<usize>,
+    pub jobs_done: Vec<usize>,
 }
 
 impl Scheduler
@@ -41,7 +41,7 @@ impl Scheduler
             registry,
             job_factory,
             now: 0.0,
-            jobs_done: HashSet::new(),
+            jobs_done: Vec::new(),
             jobs_queuing: VecDeque::new(),
             jobs_running: VecDeque::new(),
         }
@@ -72,7 +72,7 @@ impl Scheduler
         }
         // VV: It's not safe to use the sorted indices any more
         self.registry.is_dirty = true;
-        self.jobs_done.insert(job.uid);
+        self.jobs_done.push(job.uid);
         self.job_factory.job_mark_done(&job);
     }
 
@@ -279,7 +279,8 @@ impl Scheduler
             let new_running;
             let mut new_done = 0;
 
-            let mut all_uids = HashSet::new();
+            // VV: Use a BTreeSet to enforce a deterministic order when iterating the elements
+            let mut all_uids = BTreeSet::new();
 
             /*println!("Jobs running");
             for x in &self.jobs_running {
@@ -328,12 +329,8 @@ impl Scheduler
             if !all_uids.is_empty() && !self.jobs_queuing.is_empty() {
                 let recompute_uid_nodes = |registry: &NodeRegistry| -> Vec<usize> {
                     let mut uid_nodes: Vec<usize> = vec![];
-                    let mut all_uids: Vec<_> = all_uids.iter().collect();
 
-                    all_uids.sort_by(|&n1, &n2|
-                        registry.nodes[*n1].uid.cmp(&registry.nodes[*n2].uid));
-
-                    for &uid in all_uids {
+                    for &uid in &all_uids {
                         let n = &registry.nodes[uid];
 
                         let pred = |idx: &usize| -> bool {
