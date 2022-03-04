@@ -499,7 +499,6 @@ impl JobFactory for JobWorkflowFactory {
         // let front = self.jobs_ready.get(0).unwrap().uid;
 
         let mut job = self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job");
-        job.time_created = self.now;
         // println!("job_get: {}=={}:{:#}", job.uid, front, job.time_created);
         job
     }
