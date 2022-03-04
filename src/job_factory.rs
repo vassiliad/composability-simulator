@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::default::Default;
 use std::fs::File;
@@ -49,14 +49,17 @@ pub struct JobStreaming {
     next_job: Option<Job>,
 }
 
+// VV: Use a BTreeMap over a HashMap - the later does not enforce the order of keys
+// this can lead to small schedulign differences because the order of job submission
+// is not deterministic (though the job dependencies are still respected).
 pub struct JobWorkflowFactory {
-    pub jobs_dependencies: HashMap<usize, Vec<usize>>,
-    pub jobs_templates: HashMap<usize, Job>,
+    pub jobs_dependencies: BTreeMap<usize, Vec<usize>>,
+    pub jobs_templates: BTreeMap<usize, Job>,
     jobs_done: Vec<usize>,
     pub jobs_ready: VecDeque<Job>,
     // VV: job_queue = {wf_uid: {consumer_uid: (JobObject, [producer_uid])}
     // Note that the UIDs are the UIDs of the REPLICATED jobs
-    pub jobs_queue: HashMap<usize, HashMap<usize, (Job, Vec<usize>)>>,
+    pub jobs_queue: BTreeMap<usize, BTreeMap<usize, (Job, Vec<usize>)>>,
     now: f32,
     pub reader: Box<dyn BufRead>,
     pub writer: Option<Box<dyn Write>>,
@@ -267,10 +270,10 @@ impl Default for JobWorkflowFactory {
             writer: None,
             jobs_done: vec![],
             jobs_ready: VecDeque::new(),
-            jobs_queue: HashMap::new(),
+            jobs_queue: BTreeMap::new(),
             now: 0.0,
-            jobs_templates: HashMap::new(),
-            jobs_dependencies: HashMap::new(),
+            jobs_templates: BTreeMap::new(),
+            jobs_dependencies: BTreeMap::new(),
         }
     }
 }
@@ -430,7 +433,7 @@ impl JobWorkflowFactory {
         // VV: [job_uid]
         let mut ready: Vec<usize> = vec![];
         // VV: consumer_uid: [producer_uid]
-        let mut queue: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut queue: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         let empty = vec![];
 
         for x in self.jobs_templates.keys() {
@@ -446,6 +449,9 @@ impl JobWorkflowFactory {
             }
         }
 
+        self.jobs_ready.reserve(replicate * ready.len());
+
+
         for wf_uid in 0..replicate {
             for j in &ready {
                 let mut job = self.jobs_templates.get(j)
@@ -457,7 +463,7 @@ impl JobWorkflowFactory {
             }
 
             if !queue.is_empty() {
-                let mut wf_queue = HashMap::new();
+                let mut wf_queue = BTreeMap::new();
                 for (j, producers) in &queue {
                     let mut job = self.jobs_templates.get(j)
                         .expect(&format!("Expected to find JobTemplate {}", j))
@@ -472,6 +478,10 @@ impl JobWorkflowFactory {
             }
         }
 
+        // println!("Ready to execute jobs {:?}", self.jobs_ready.len());
+        // for x in &self.jobs_ready {
+        //     println!("{}", x.uid);
+        // }
         // println!("Ready to execute jobs {:?}", self.jobs_ready);
         // println!("Queueing jobs {:?}", self.jobs_queue);
 
@@ -486,9 +496,11 @@ impl JobFactory for JobWorkflowFactory {
 
 
     fn job_get(&mut self) -> Job {
+        // let front = self.jobs_ready.get(0).unwrap().uid;
+
         let mut job = self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job");
         job.time_created = self.now;
-
+        // println!("job_get: {}=={}:{:#}", job.uid, front, job.time_created);
         job
     }
 
