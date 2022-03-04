@@ -54,8 +54,9 @@ mod test_scheduler {
         let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, false);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
@@ -73,8 +74,9 @@ mod test_scheduler {
             &job_created, 1.0, 1.0, 5.0, false);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), num_jobs);
 
@@ -101,8 +103,9 @@ mod test_scheduler {
         let job_factory = JobCollection::new(jobs);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() && !sched.has_unschedulable() {}
+        while steps < 1000 && sched.tick() && !sched.has_unschedulable() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), num_jobs);
 
@@ -152,8 +155,9 @@ mod test_scheduler {
         let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, true);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 10.0);
