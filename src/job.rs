@@ -23,6 +23,8 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use anyhow::Context;
+
 static NEXT_JOB_UID: AtomicUsize = AtomicUsize::new(0);
 static mut LAST_TIME_CREATED: f32 = 0.0;
 
@@ -33,7 +35,7 @@ pub fn reset_job_metadata() {
     NEXT_JOB_UID.store(0, Ordering::SeqCst);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Job {
     pub uid: usize,
     pub cores: f32,
@@ -113,6 +115,10 @@ impl Job {
 
 impl Display for Job {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // VV: format is:
+        // uid:usize;cores:f32;memory:f32;duration:f32;can_borrow:y/n,
+        // time_created:f32(sec);time_started:f32(sec);time_done:f32(sec),
+        // node_cores_uid:usize;[node_memory_uid:usize;memory:f32]+
         if self.time_done.is_some() {
             write!(f, "{};{};{};{};{};{};{};{};{}",
                    self.uid, self.cores, self.memory, self.duration,
@@ -142,77 +148,95 @@ impl Display for Job {
 
 impl FromStr for Job {
     type Err = String;
-    /// Format is <uid:usize or '?' to use next available UID>;<cores:f32>;<memory:f32>;<duration:f32>;<borrow:y/n>;<time_created:f32>
+    /// Format is:
+    ///
+    /// uid:usize; cores:f32; memory:f32; duration:f32; can_borrow:y/n;
+    /// time_created:f32(sec); time_started:f32(sec); time_done:f32(sec);
+    /// node_cores_uid:usize; 
+    /// [node_memory_uid:usize; memory:f32]+
+    ///
+    /// "uid" can also be '?' to auto-pick number.
     /// First job must have uid 0, subsequent jobs must increase uid by 1 and Jobs
     /// cannot skip UID values.
     ///
     /// Just use '?' for the parser to pick the appropriate UID.
     fn from_str(line: &str) -> Result<Self, <Self as FromStr>::Err> {
         let tokens: Vec<_> = line.split(';').map(|s| s.trim()).collect();
+        let num = tokens.len();
 
-        if tokens.len() != 6 {
+        if num != 6 && num != 9 && !(num > 9 && (num - 9) % 2 == 0) {
             return Err(format!(
-                "Expected 6 tokens partitioned by ';' in string but found \"{:?}\"",
-                tokens
-            ));
+                "Expected 6 or 9 or 9+2*N tokens partitioned by ';' in string but found {}: \"{:?}\"",
+                num, tokens));
         }
 
-        let uid: usize;
-        if tokens[0] == "?" {
-            uid = NEXT_JOB_UID.fetch_or(0, Ordering::SeqCst);
+        let uid: usize = if tokens[0] == "?" {
+            NEXT_JOB_UID.fetch_or(0, Ordering::SeqCst)
         } else if let Ok(c) = tokens[0].parse() {
-            uid = c;
+            c
         } else {
             return Err(format!("Invalid uid \"{}\"", tokens[0]));
-        }
+        };
 
-        let cores: f32;
-        if let Ok(c) = tokens[1].parse() {
-            cores = c;
+        let cores: f32 = if let Ok(c) = tokens[1].parse() {
+            c
         } else {
             return Err(format!("Invalid cores \"{}\"", tokens[1]));
-        }
+        };
 
-        let memory: f32;
-        if let Ok(c) = tokens[2].parse() {
-            memory = c;
+        let memory: f32 = if let Ok(c) = tokens[2].parse() {
+            c
         } else {
             return Err(format!("Invalid memory \"{}\"", tokens[2]));
-        }
+        };
 
-        let duration: f32;
-        if let Ok(c) = tokens[3].parse() {
-            duration = c;
+        let duration: f32 = if let Ok(c) = tokens[3].parse() {
+            c
         } else {
             return Err(format!("Invalid duration \"{}\"", tokens[3]));
-        }
+        };
 
-        let borrow: bool;
-        if tokens[4] == "y" {
-            borrow = true;
+        let borrow: bool = if tokens[4] == "y" {
+            true
         } else if tokens[4] == "n" {
-            borrow = false;
+            false
         } else {
-            return Err(format!(
-                "borrow may only be y or n but found \"{}\"",
-                tokens[4]
-            ));
-        }
+            return Err(format!("borrow may only be y or n but found \"{}\"", tokens[4]));
+        };
 
-        let time_created: f32;
-        if let Ok(c) = tokens[5].parse() {
-            time_created = c;
+        let time_created: f32 = if let Ok(c) = tokens[5].parse() {
+            c
         } else {
             return Err(format!("Invalid time_created \"{}\"", tokens[5]));
-        }
+        };
 
-        Ok(Self::new_with_uid(
+        let mut job = Self::new_with_uid(
             uid,
             cores,
             memory,
             duration,
             borrow,
             time_created,
-        ))
+        );
+
+        if num > 6 {
+            if let Ok(c) = tokens[6].parse() {
+                job.node_cores = Some(c);
+            } else {
+                return Err(format!("Invalid uid_cores \"{}\"", tokens[6]));
+            }
+
+            for i in (7..num).step_by(2) {
+                let mem_node: usize = tokens[i].parse()
+                    .with_context(|| format!("Invalid node_memory_uid \"{}\"", tokens[i]))
+                    .unwrap();
+                let mem_memory: f32 = tokens[i + 1].parse()
+                    .with_context(|| format!("Invalid node_memory_memory \"{}\"", tokens[i + 1]))
+                    .unwrap();
+                job.node_memory.push((mem_node, mem_memory));
+            }
+        }
+
+        Ok(job)
     }
 }

@@ -161,13 +161,25 @@ impl NodeRegistry {
     }
 
     fn insort_cores(&mut self, node: &Node) {
-        let cores_at_least = |n: &Node| -> bool { n.cores.current < node.cores.current };
+        let cores_at_least = |n: &Node| -> bool {
+            match n.cores.current.partial_cmp(&node.cores.current).unwrap() {
+                std::cmp::Ordering::Less => true,
+                std::cmp::Ordering::Greater => false,
+                std::cmp::Ordering::Equal => n.uid < node.uid
+            }
+        };
         let idx = self.index_bisect_right(&self.sorted_cores, cores_at_least, None, None);
         self.sorted_cores.insert(idx, node.uid);
     }
 
     fn insort_memory(&mut self, node: &Node) {
-        let memory_at_least = |n: &Node| -> bool { n.memory.current < node.memory.current };
+        let memory_at_least = |n: &Node| -> bool {
+            match n.memory.current.partial_cmp(&node.memory.current).unwrap() {
+                std::cmp::Ordering::Less => true,
+                std::cmp::Ordering::Greater => false,
+                std::cmp::Ordering::Equal => n.uid < node.uid
+            }
+        };
         let idx = self.index_bisect_right(&self.sorted_memory, memory_at_least, None, None);
         self.sorted_memory.insert(idx, node.uid);
     }
@@ -185,17 +197,23 @@ impl NodeRegistry {
 
     pub fn resort_nodes_cores(&mut self) {
         self.sorted_cores.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
-            self.nodes[*idx1].cores.current.partial_cmp(
-                &self.nodes[*idx2].cores.current)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            match self.nodes[*idx1].cores.current.partial_cmp(&self.nodes[*idx2].cores.current)
+                .unwrap_or(std::cmp::Ordering::Equal) {
+                std::cmp::Ordering::Equal =>
+                    self.nodes[*idx1].uid.partial_cmp(&self.nodes[*idx2].uid).unwrap(),
+                n => n
+            }
         });
     }
 
     pub fn resort_nodes_memory(&mut self) {
         self.sorted_memory.sort_by(|idx1: &usize, idx2: &usize| -> std::cmp::Ordering {
-            self.nodes[*idx1].memory.current.partial_cmp(
-                &self.nodes[*idx2].memory.current)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            match self.nodes[*idx1].memory.current.partial_cmp(&self.nodes[*idx2].memory.current)
+                .unwrap_or(std::cmp::Ordering::Equal) {
+                std::cmp::Ordering::Equal =>
+                    self.nodes[*idx1].uid.partial_cmp(&self.nodes[*idx2].uid).unwrap(),
+                n => n
+            }
         });
     }
 
@@ -208,25 +226,6 @@ impl NodeRegistry {
             .iter()
             .skip(idx)
             .map(|idx| &self.nodes[*idx])
-    }
-
-    #[allow(dead_code)]
-    pub fn idx_sorted_cores(&self, node: &Node) -> usize {
-        let cores_target = node.cores.current;
-        let uid = node.uid;
-
-        let pred_cores = |node: &Node| -> bool { node.cores.current < cores_target };
-
-        let idx_cores = self.index_bisect_right(&self.sorted_cores, pred_cores, None, None);
-
-        let sorted_cores = &self.sorted_cores;
-        let idx_cores = sorted_cores[idx_cores..sorted_cores.len()]
-            .iter()
-            .position(|idx: &usize| self.nodes[*idx].uid == uid)
-            .unwrap()
-            + idx_cores;
-
-        idx_cores
     }
 
     pub fn idx_nodes_with_more_memory(&self, memory: f32) -> usize {
@@ -243,24 +242,6 @@ impl NodeRegistry {
             node.cores.current < cores
         };
         self.sorted_cores.partition_point(pred)
-    }
-
-    #[allow(dead_code)]
-    pub fn idx_sorted_memory(&self, node: &Node) -> usize {
-        let memory_target = node.memory.current;
-        let uid = node.uid;
-
-        let pred_memory = |node: &Node| -> bool { node.memory.current < memory_target };
-        let sorted_memory = &self.sorted_memory;
-        let idx_memory = self.index_bisect_right(sorted_memory, pred_memory, None, None);
-
-        let idx_memory = sorted_memory[idx_memory..sorted_memory.len()]
-            .iter()
-            .position(|idx: &usize| self.nodes[*idx].uid == uid)
-            .unwrap()
-            + idx_memory;
-
-        idx_memory
     }
 
     pub fn new_connection_from_str(&mut self, line: &str) -> Result<()> {
@@ -320,7 +301,7 @@ impl NodeRegistry {
         let nodes: Vec<_> = self.nodes.iter()
             .enumerate()
             .filter_map(|(idx, node)| {
-                if node.cores.current > 0. {
+                if node.cores.current >= 0. {
                     let memory = if composable {
                         self.avl_memory_to_node_uid(node.uid)
                     } else {

@@ -1,10 +1,12 @@
 use anyhow::Result;
 
-use dismem::job::Job;
-use dismem::job::reset_job_metadata;
-use dismem::job_factory::JobCollection;
-use dismem::registry::NodeRegistry;
-use dismem::scheduler::Scheduler;
+use compsim::job::Job;
+use compsim::job::reset_job_metadata;
+use compsim::job_factory::JobCollection;
+use compsim::job_factory::JobFactory;
+use compsim::job_factory::JobWorkflowFactory;
+use compsim::registry::NodeRegistry;
+use compsim::scheduler::Scheduler;
 
 #[cfg(test)]
 mod test_scheduler {
@@ -52,8 +54,9 @@ mod test_scheduler {
         let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, false);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 11.0);
@@ -71,8 +74,9 @@ mod test_scheduler {
             &job_created, 1.0, 1.0, 5.0, false);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), num_jobs);
 
@@ -99,8 +103,9 @@ mod test_scheduler {
         let job_factory = JobCollection::new(jobs);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() && !sched.has_unschedulable() {}
+        while steps < 1000 && sched.tick() && !sched.has_unschedulable() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), num_jobs);
 
@@ -150,11 +155,41 @@ mod test_scheduler {
         let job_factory = jobfactory_init_homogeneous(&job_created, 1.0, 1.0, 5.0, true);
 
         let mut sched = Scheduler::new(reg, Box::new(job_factory));
+        let mut steps = 0;
 
-        while sched.tick() {}
+        while steps < 1000 && sched.tick() { steps += 1 }
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 10.0);
+        Ok(())
+    }
+
+    #[test]
+    fn workflow_factory_vanilla_small() -> Result<()> {
+        let mut reg = NodeRegistry::new();
+        reg.new_node("CPU", 4.0, 2.0)?;
+        reg.new_node("RAM", 4.0, 8.0)?;
+
+        let content = "\
+            0;2.0;1.0;5.0;y;0.0\n\
+            1;1.0;1.0;1.0;y;1.0\n
+            :dependencies\n\
+            :replicate 2\n\
+            1;0";
+
+        let factory = JobWorkflowFactory::from_string(content.to_string())?;
+
+        let mut sched = Scheduler::new(reg, Box::new(factory));
+        let mut steps = 0;
+
+        while steps < 1000 {
+            println!("Process tick {}", sched.now);
+            steps += 1;
+            if !sched.tick() { break }
+        }
+
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
+        assert_eq!(sched.now, 6.0);
         Ok(())
     }
 }

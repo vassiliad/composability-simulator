@@ -1,12 +1,11 @@
-// use dismem::job::reset_job_metadata;
 use anyhow::Result;
 
-use dismem::job_factory::JobStreaming;
+use compsim::job_factory::JobFactory;
+use compsim::job_factory::JobStreaming;
+use compsim::job_factory::JobWorkflowFactory;
 
 #[cfg(test)]
 mod test_job_factory {
-    use dismem::job_factory::JobFactory;
-
     use super::*;
 
     #[test]
@@ -40,6 +39,34 @@ mod test_job_factory {
         }
 
         assert_eq!(factory.jobs_done().len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn job_factory_workflow() -> Result<()> {
+        let content = "0;0.0;0.0;0.0;y;0.0\n\
+        # this is a comment above an empty line\n\
+        \n\
+        1;1.0;1.0;1.0;y;1.0\n
+        # 2;1.0;1.0;1.0;y;1.0\n
+        # the line above is a comment\n\
+        :dependencies\n\
+        :replicate 1\n\
+        1;0";
+
+        println!("{}", content);
+
+        let factory = JobWorkflowFactory::from_string(content.to_string())?;
+
+        assert_eq!(factory.jobs_dependencies.get(&0), None);
+        assert_eq!(factory.jobs_dependencies.get(&1), Some(&vec![0]));
+
+        println!("Next up: {:?}", factory.job_peek());
+
+        assert_eq!(factory.job_peek().is_none(), false);
+
+        // assert!(false);
 
         Ok(())
     }

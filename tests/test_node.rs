@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use dismem::node;
-use dismem::registry;
+use compsim::node;
+use compsim::registry;
 
 #[cfg(test)]
 mod test_node {

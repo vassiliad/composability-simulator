@@ -16,7 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
 use crate::job::Job;
@@ -31,7 +31,7 @@ pub struct Scheduler
 
     pub jobs_queuing: VecDeque<Job>,
     pub jobs_running: VecDeque<Job>,
-    pub jobs_done: HashSet<usize>,
+    pub jobs_done: Vec<usize>,
 }
 
 impl Scheduler
@@ -41,7 +41,7 @@ impl Scheduler
             registry,
             job_factory,
             now: 0.0,
-            jobs_done: HashSet::new(),
+            jobs_done: Vec::new(),
             jobs_queuing: VecDeque::new(),
             jobs_running: VecDeque::new(),
         }
@@ -55,15 +55,13 @@ impl Scheduler
 
     fn job_free(&mut self, job: Job) {
         // println!(
-        //     "Freeing {}x{} from cores {} and memory {:?}",
-        //     job.cores,
-        //     job.memory,
-        //     job.node_cores.unwrap(),
-        //     job.node_memory
+        //      "Freeing {}(on {}):{}x{} from cores {} and memory {:?}",
+        //      job.uid, job.time_done.unwrap(),
+        //      job.cores,
+        //      job.memory,
+        //      job.node_cores.unwrap(),
+        //      job.node_memory
         // );
-
-        self.jobs_done.insert(job.uid);
-        self.job_factory.job_mark_done(&job);
 
         let uid_cores = job.node_cores.unwrap();
         self.registry.nodes[uid_cores].free_cores(job.cores);
@@ -74,6 +72,8 @@ impl Scheduler
         }
         // VV: It's not safe to use the sorted indices any more
         self.registry.is_dirty = true;
+        self.jobs_done.push(job.uid);
+        self.job_factory.job_mark_done(&job);
     }
 
     fn try_allocate_on_many_nodes(
@@ -137,8 +137,8 @@ impl Scheduler
             node_mem.allocate_memory(*allocated);
         }
         job.node_memory.append(&mut all_memory);
-        // println!("Scheduling {}x{} on Cores:{:?}, Memory:{:?}",
-        // job.cores, job.memory, job.node_cores, job.node_memory);
+        // println!("Scheduling {}:{}x{} on Cores:{:?}, Memory:{:?}",
+        //     job.uid, job.cores, job.memory, job.node_cores, job.node_memory);
 
         // VV: It's not safe to use the sorted indices any more
         registry.is_dirty = true;
@@ -231,6 +231,13 @@ impl Scheduler
         }
 
         let cores_start = registry.idx_nodes_with_more_cores(job.cores);
+
+        // println!("Searching for {} cores for {} in -> idx {cores_start}", job.cores, job.uid);
+        // for &x in &registry.sorted_cores {
+        //     print!("{}, ", registry.nodes[x].cores.current);
+        // }
+        // println!("");
+
         if cores_start == registry.sorted_cores.len() {
             return false;
         }
@@ -272,18 +279,29 @@ impl Scheduler
             let new_running;
             let mut new_done = 0;
 
-            let mut all_uids = HashSet::new();
+            // VV: Use a BTreeSet to enforce a deterministic order when iterating the elements
+            let mut all_uids = BTreeSet::new();
+
+            /*println!("Jobs running");
+            for x in &self.jobs_running {
+                println!(",{},{},{}", x.uid, x.time_done.unwrap(), x.node_cores.unwrap());
+            }*/
+
+            /*println!("Sorted cores: {:?}", self.registry.sorted_cores);
+            for x in &self.registry.sorted_cores {
+                println!("{}", self.registry.nodes[*x].cores.current);
+            }*/
 
             while !self.jobs_running.is_empty() {
                 let job = &self.jobs_running[0];
                 if job.time_done.unwrap() <= self.now {
                     let job = self.jobs_running.pop_front().unwrap();
-                    // println!(
-                    //     "  Job {} that started on {} with duration {} finished",
-                    //     job.uid,
-                    //     job.time_started.unwrap(),
-                    //     job.duration
-                    // );
+                    /*println!(
+                        "  Job {} that started on {} with duration {} finished",
+                        job.uid,
+                        job.time_started.unwrap(),
+                        job.duration
+                   );*/
 
                     all_uids.insert(job.node_cores.unwrap());
                     for &(uid_mem, _) in &job.node_memory {
@@ -309,29 +327,33 @@ impl Scheduler
             }
 
             if !all_uids.is_empty() && !self.jobs_queuing.is_empty() {
-                let recompute_uid_nodes = |registry: &NodeRegistry|
-                                           -> Vec<usize>
-                    {
-                        let mut uid_nodes: Vec<usize> = vec![];
+                let recompute_uid_nodes = |registry: &NodeRegistry| -> Vec<usize> {
+                    let mut uid_nodes: Vec<usize> = vec![];
 
-                        for &uid in &all_uids {
-                            let n = &registry.nodes[uid];
-                            let cores = n.cores.current;
+                    for &uid in &all_uids {
+                        let n = &registry.nodes[uid];
 
-                            let pred = |idx: &usize| -> bool {
-                                let node = &registry.nodes[*idx];
-                                node.cores.current < cores
-                            };
+                        let pred = |idx: &usize| -> bool {
+                            let node = &registry.nodes[*idx];
+                            match node.cores.current.partial_cmp(&n.cores.current).unwrap() {
+                                std::cmp::Ordering::Equal => {
+                                    return node.uid < n.uid
+                                },
+                                std::cmp::Ordering::Less => true,
+                                std::cmp::Ordering::Greater => false,
+                            }
+                        };
 
-                            let index = uid_nodes.partition_point(pred);
-                            uid_nodes.insert(index, n.uid)
-                        }
-                        uid_nodes
-                    };
+                        let index = uid_nodes.partition_point(pred);
+                        uid_nodes.insert(index, n.uid)
+                    }
+                    uid_nodes
+                };
                 let mut uid_nodes = recompute_uid_nodes(&self.registry);
 
                 for (i, job) in self.jobs_queuing.iter_mut().enumerate() {
                     if Self::job_allocate_on_nodes_subset(&mut self.registry, job, &uid_nodes) {
+                        // println!("Allocated on subset nodes: {:?}", uid_nodes);
                         run_now.push(i);
                         uid_nodes = recompute_uid_nodes(&self.registry);
                     }
@@ -343,6 +365,7 @@ impl Scheduler
             while let Some(job) = self.job_factory.job_peek() {
                 if job.time_created <= self.now {
                     let job = self.job_factory.job_get();
+                    // println!("New queueing {}:{:#}", job.uid, job.time_created);
                     self.jobs_queuing.push_back(job);
                     new_queueing += 1;
                 } else {
@@ -389,8 +412,12 @@ impl Scheduler
                         job.time_started = Some(self.now);
                         job.time_done = Some(done);
 
-                        let predicate = |job: &Job| -> bool {
-                            job.time_done.unwrap() < done
+                        let predicate = |j: &Job| -> bool {
+                            match j.time_done.unwrap().partial_cmp(&done).unwrap() {
+                                std::cmp::Ordering::Equal => j.uid < job.uid,
+                                std::cmp::Ordering::Less => true,
+                                std::cmp::Ordering::Greater => false,
+                            }
                         };
                         let idx = self.jobs_running.partition_point(predicate);
                         self.jobs_running.insert(idx, job);
