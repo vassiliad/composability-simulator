@@ -391,7 +391,7 @@ impl JobWorkflowFactory {
                 if uid != expected_uid {
                     bail!("Expected uid {expected_uid} for job {job}")
                 }
-                job.time_created = f32::MAX;
+
                 self.jobs_templates.insert(uid, job);
                 expected_uid += 1;
             } else {
@@ -458,7 +458,6 @@ impl JobWorkflowFactory {
                     .expect(&format!("Expected to find JobTemplate {}", j))
                     .to_owned();
                 job.uid = job.uid + wf_uid * self.jobs_templates.len();
-                job.time_created = self.now;
                 self.jobs_ready.push_back(job)
             }
 
@@ -498,7 +497,7 @@ impl JobFactory for JobWorkflowFactory {
     fn job_get(&mut self) -> Job {
         // let front = self.jobs_ready.get(0).unwrap().uid;
 
-        let mut job = self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job");
+        let job = self.jobs_ready.pop_front().expect("Expected to have at least 1 ready Job");
         // println!("job_get: {}=={}:{:#}", job.uid, front, job.time_created);
         job
     }
@@ -541,7 +540,7 @@ impl JobFactory for JobWorkflowFactory {
                         the record for it in the queue is missing"));
                 let (mut job, _) = queue.remove(&ruid)
                     .expect(&format!("Job {ruid} is ready but cannot be found in queue"));
-                job.time_created = self.now;
+                job.time_created += self.now;
                 self.jobs_ready.push_back(job);
                 queue_empty = queue.is_empty();
             }

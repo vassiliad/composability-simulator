@@ -172,7 +172,7 @@ mod test_scheduler {
 
         let content = "\
             0;2.0;1.0;5.0;y;0.0\n\
-            1;1.0;1.0;1.0;y;1.0\n
+            1;1.0;1.0;1.0;y;0.0\n
             :dependencies\n\
             :replicate 2\n\
             1;0";
@@ -190,6 +190,35 @@ mod test_scheduler {
 
         assert_eq!(sched.job_factory.jobs_done().len(), 4);
         assert_eq!(sched.now, 6.0);
+        Ok(())
+    }
+
+    #[test]
+    fn workflow_factory_vanilla_small_with_delay() -> Result<()> {
+        let mut reg = NodeRegistry::new();
+        reg.new_node("CPU", 4.0, 2.0)?;
+        reg.new_node("RAM", 4.0, 8.0)?;
+
+        let content = "\
+            0;2.0;1.0;5.0;y;0.0\n\
+            1;1.0;1.0;1.0;y;4.0\n
+            :dependencies\n\
+            :replicate 2\n\
+            1;0";
+
+        let factory = JobWorkflowFactory::from_string(content.to_string())?;
+
+        let mut sched = Scheduler::new(reg, Box::new(factory));
+        let mut steps = 0;
+
+        while steps < 1000 {
+            println!("Process tick {}", sched.now);
+            steps += 1;
+            if !sched.tick() { break }
+        }
+
+        assert_eq!(sched.job_factory.jobs_done().len(), 4);
+        assert_eq!(sched.now, 6.0+4.0);
         Ok(())
     }
 }
